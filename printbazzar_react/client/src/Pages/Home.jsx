@@ -1,6 +1,5 @@
 import React from 'react';
 import { Slider } from '../Components/Slider';
-import TrustHighlights from '../Components/TrustHighlights';
 import HowItWorks from '../Components/HowItWorks';
 import { PopularCategories } from '../Components/PopularCategories';
 import { HomeCategorySection } from '../Components/HomeCategorySection';
@@ -11,7 +10,6 @@ export default function Home() {
   return (
     <div>
       <Slider />
-      <TrustHighlights />
       <PopularCategories />
       <HomeCategorySection categorySlug="business-cards" title="Business & Visiting Cards" />
       <HomeCategorySection categorySlug="stickers-and-labels" title="Custom Stickers & Product Labels" />
