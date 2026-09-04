@@ -497,21 +497,6 @@ export default function FooterCom() {
               )}
             </div>
           </div>
-
-          {/* Secure Payment Methods Display */}
-          {data.paymentMethods && data.paymentMethods.length > 0 && (
-            <div className="flex flex-wrap items-center justify-center gap-2 text-[10px] text-gray-400">
-              <span className="font-bold text-gray-300">100% Secure Checkout:</span>
-              {data.paymentMethods.map((pay, idx) => (
-                <span
-                  key={pay.id || idx}
-                  className="bg-gray-900 border border-gray-800 px-2 py-0.5 rounded font-mono font-bold text-white shadow-xs"
-                >
-                  {pay.label || pay.code}
-                </span>
-              ))}
-            </div>
-          )}
         </div>
       </div>
     </footer>
