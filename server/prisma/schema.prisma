@@ -1,0 +1,952 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id              String               @id @default(uuid())
+  name            String
+  email           String               @unique
+  passwordHash    String
+  department      String               @default("ALL") // DESIGN, PRODUCTION, FINISHING_QC, PACKING, DELIVERY, ALL
+  roleId          String
+  role            Role                 @relation(fields: [roleId], references: [id])
+  isActive        Boolean              @default(true)
+  lastLoginAt     DateTime?
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+
+  orderNotes      OrderNote[]
+  statusHistories OrderStatusHistory[]
+  priceHistories  PriceHistory[]
+  priceVersions   PriceVersion[]
+  auditLogs       AuditLog[]
+  assignedDesignOrders DesignOrder[]
+  authSessions    AuthSession[]
+}
+
+model Role {
+  id          String           @id @default(uuid())
+  name        String           @unique
+  description String?
+  isSystem    Boolean          @default(false)
+  createdAt   DateTime         @default(now())
+
+  users       User[]
+  permissions RolePermission[]
+}
+
+model Permission {
+  id              String           @id @default(uuid())
+  code            String           @unique
+  module          String
+  description     String?
+
+  rolePermissions RolePermission[]
+}
+
+model RolePermission {
+  id           String     @id @default(uuid())
+  roleId       String
+  permissionId String
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+}
+
+model Category {
+  id              String     @id @default(uuid())
+  name            String
+  slug            String     @unique
+  imageUrl        String?
+  bannerUrl       String?
+  description     String?
+  parentId        String?
+  parent          Category?  @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children        Category[] @relation("CategoryHierarchy")
+  displayOrder    Int        @default(0)
+  isActive        Boolean    @default(true)
+  metaTitle       String?
+  metaDescription String?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  products        Product[]
+}
+
+model Product {
+  id               String                 @id @default(uuid())
+  sku              String                 @unique
+  name             String
+  slug             String                 @unique
+  categoryId       String
+  category         Category               @relation(fields: [categoryId], references: [id])
+  shortDescription String?
+  fullDescription  String?
+  thumbnailUrl     String?
+  videoUrl         String?
+  startingPrice    Float                  @default(0)
+  minQuantity      Int                    @default(1)
+  maxQuantity      Int?
+  quantityUnit     String                 @default("Pieces") // Cards, Pieces, Sheets, Pairs, Sq.ft, Boxes, Sets
+  quantityType     String                 @default("FIXED") // FIXED, CUSTOM, BOTH
+  customQtyMin     Int                    @default(100)
+  customQtyMax     Int?
+  customQtyStep    Int                    @default(50)
+  customUnitPrice  Float?
+  pricingType      String                 @default("TIERED") // FIXED_QTY, PER_PIECE, PER_SQFT, TIERED, CONFIGURATION, CUSTOM_QUOTE
+  pricingSource    String                 @default("CURRENT_PRINTBAZZAR_WEBSITE")
+  sourceStatus     String                 @default("LIVE_CONFIRMED")
+  gstPercentage          Float                  @default(18.0)
+  productionDays         Int                    @default(1)
+  singleSideDesignCharge Float                  @default(200.0)
+  doubleSideDesignCharge Float                  @default(400.0)
+  turnaroundTime         String?                @default("Single Day Delivery (Order Before 12PM)")
+  deliveryInfo           String?                @default("Fast local & courier delivery available")
+  hasCustomDesign        Boolean                @default(true)
+  isFeatured             Boolean                @default(false)
+  isBestSeller           Boolean                @default(false)
+  isNewArrival           Boolean                @default(false)
+  status                 String                 @default("ACTIVE") // DRAFT, ACTIVE, INACTIVE, ARCHIVED
+  metaTitle              String?
+  metaDescription        String?
+  createdAt              DateTime               @default(now())
+  updatedAt              DateTime               @updatedAt
+
+  images           ProductImage[]
+  specifications   ProductSpecification[]
+  options          ProductOption[]
+  combinations     ProductCombination[]
+  priceSlabs       ProductPriceSlab[]
+  priceHistories   PriceHistory[]
+  reviews          Review[]
+  cartItems        CartItem[]
+  orderItems       OrderItem[]
+  artworkSetting   ProductArtworkSetting?
+  designPackages   ProductDesignPackage[]
+  designBriefFields ProductDesignBriefField[]
+  artworkUploads   ArtworkUpload[]
+  packageMappings  ProductDesignPackageMapping[]
+  designOrders     DesignOrder[]
+  productionJobs   ProductionJob[]
+  optionMappings       ProductOptionMapping[]
+  pricingMatrices      ProductPricingMatrix[]
+  compatibilityRules   ProductCompatibilityRule[]
+  priceVersions        PriceVersion[]
+}
+
+model ProductImage {
+  id           String   @id @default(uuid())
+  productId    String
+  product      Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  imageUrl     String
+  imageType    String   @default("GALLERY") // MAIN, GALLERY, MATERIAL, SPECIFICATION
+  displayOrder Int      @default(0)
+  createdAt    DateTime @default(now())
+}
+
+model ProductSpecification {
+  id           String  @id @default(uuid())
+  productId    String
+  product      Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  specKey      String
+  specValue    String
+  displayOrder Int     @default(0)
+}
+
+model ProductOption {
+  id           String               @id @default(uuid())
+  productId    String
+  product      Product              @relation(fields: [productId], references: [id], onDelete: Cascade)
+  optionName   String
+  optionType   String               @default("SELECT") // SELECT, RADIO, CHECKBOX
+  isAddon      Boolean              @default(false) // false = Core Dimension, true = Optional Add-on modifier
+  isRequired   Boolean              @default(true)
+  displayOrder Int                  @default(0)
+
+  values       ProductOptionValue[]
+}
+
+model ProductOptionValue {
+  id                 String        @id @default(uuid())
+  optionId           String
+  option             ProductOption @relation(fields: [optionId], references: [id], onDelete: Cascade)
+  valueLabel         String
+  priceModifierType  String        @default("FLAT") // FLAT, PERCENT, PER_UNIT
+  priceModifierValue Float         @default(0)
+  displayOrder       Int           @default(0)
+}
+
+model ProductCombination {
+  id             String   @id @default(uuid())
+  productId      String
+  product        Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  combinationKey String   // e.g. "size:3.5x2|mat:300gsm|side:double|lam:matte"
+  optionsJson    String   // JSON map of option values e.g. {"Size":"3.5 x 2","GSM":"300 GSM"}
+  quantity       Int
+  price          Float
+  sku            String?
+  isAvailable    Boolean  @default(true)
+  displayOrder   Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([productId, quantity])
+  @@index([productId, combinationKey])
+}
+
+model ProductPriceSlab {
+  id                     String  @id @default(uuid())
+  productId              String
+  product                Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  minQty                 Int
+  maxQty                 Int?
+  unitPrice              Float   @default(0)
+  singleSidePrice        Float   @default(0)
+  doubleSidePrice        Float   @default(0)
+  designCharge           Float   @default(200)
+  singleSideDesignCharge Float   @default(200)
+  doubleSideDesignCharge Float   @default(400)
+  unitName               String  @default("Pieces")
+  pricingType            String  @default("TIERED")
+  source                 String  @default("CURRENT_PRINTBAZZAR_WEBSITE")
+}
+
+model PriceHistory {
+  id              String   @id @default(uuid())
+  productId       String
+  product         Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  oldPriceData    String // JSON string
+  newPriceData    String // JSON string
+  changedByUserId String?
+  changedBy       User?    @relation(fields: [changedByUserId], references: [id])
+  reason          String?
+  createdAt       DateTime @default(now())
+}
+
+model OptionMaster {
+  id           String               @id @default(uuid())
+  code         String               @unique // e.g. "size", "quantity", "gsm", "material", "printing", "lamination", "corner", "finishing", "shape", "orientation", "folding", "foil", "spot_uv"
+  name         String               // e.g. "Size", "Quantity", "GSM", "Material", "Printing", "Lamination", "Corner", "Finishing", "Shape", "Orientation", "Folding", "Foil Stamping", "Spot UV"
+  description  String?
+  optionType   String               @default("SELECT") // SELECT, RADIO, CHECKBOX, PILLS
+  isAddon      Boolean              @default(false)
+  displayOrder Int                  @default(0)
+  isActive     Boolean              @default(true)
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+
+  values          OptionMasterValue[]
+  productMappings ProductOptionMapping[]
+}
+
+model OptionMasterValue {
+  id                   String                      @id @default(uuid())
+  masterId             String
+  master               OptionMaster                @relation(fields: [masterId], references: [id], onDelete: Cascade)
+  code                 String                      // e.g. "90x54mm", "front_back", "matte", "gloss", "rounded_corner"
+  label                String                      // e.g. "90 × 54 mm", "Front & Back", "Thermal Matte Lamination"
+  description          String?
+  swatchValue          String?
+  defaultModifierType  String                      @default("FLAT") // FLAT, PERCENT, PER_UNIT
+  defaultModifierValue Float                       @default(0)
+  displayOrder         Int                         @default(0)
+  isActive             Boolean                     @default(true)
+  createdAt            DateTime                    @default(now())
+  updatedAt            DateTime                    @updatedAt
+
+  productValueMappings ProductOptionValueMapping[]
+
+  @@unique([masterId, code])
+}
+
+model ProductOptionMapping {
+  id               String                      @id @default(uuid())
+  productId        String
+  product          Product                     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  masterId         String
+  master           OptionMaster                @relation(fields: [masterId], references: [id], onDelete: Cascade)
+  customLabel      String?
+  isRequired       Boolean                     @default(true)
+  isAddon          Boolean                     @default(false)
+  defaultValue     String?
+  displayOrder     Int                         @default(0)
+  pricingBehavior  String                      @default("MATRIX_DIMENSION") // MATRIX_DIMENSION, ADDON_SURCHARGE, INFORMATIONAL
+  isEnabled        Boolean                     @default(true)
+  createdAt        DateTime                    @default(now())
+  updatedAt        DateTime                    @updatedAt
+
+  valueMappings    ProductOptionValueMapping[]
+
+  @@unique([productId, masterId])
+  @@index([productId, displayOrder])
+}
+
+model ProductOptionValueMapping {
+  id                 String               @id @default(uuid())
+  mappingId          String
+  mapping            ProductOptionMapping @relation(fields: [mappingId], references: [id], onDelete: Cascade)
+  masterValueId      String
+  masterValue        OptionMasterValue    @relation(fields: [masterValueId], references: [id], onDelete: Cascade)
+  customLabel        String?
+  priceModifierType  String               @default("FLAT") // FLAT, PERCENT, PER_UNIT
+  priceModifierValue Float                @default(0)
+  isDefault          Boolean              @default(false)
+  isEnabled          Boolean              @default(true)
+  displayOrder       Int                  @default(0)
+
+  @@unique([mappingId, masterValueId])
+  @@index([mappingId, displayOrder])
+}
+
+model ProductPricingMatrix {
+  id             String   @id @default(uuid())
+  productId      String
+  product        Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  combinationKey String   // e.g. "size:90x54|qty:1000|printing:double|lamination:matte|corner:rounded"
+  optionsJson    String   // JSON string map e.g. {"Size":"90 × 54 mm","Printing":"Front & Back"}
+  quantity       Int
+  price          Float
+  unitPrice      Float?
+  sku            String?
+  isAvailable    Boolean  @default(true)
+  displayOrder   Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([productId, quantity])
+  @@index([productId, combinationKey])
+}
+
+model ProductCompatibilityRule {
+  id                String   @id @default(uuid())
+  productId         String
+  product           Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  ruleName          String
+  triggerOptionCode String   // e.g. "printing" or "lamination"
+  triggerValueCode  String   // e.g. "single_side" or "none"
+  operator          String   @default("EQUALS") // EQUALS, NOT_EQUALS, IN
+  action            String   // HIDE_TARGET, DISABLE_TARGET, REQUIRE_TARGET
+  targetOptionCode  String   // e.g. "spot_uv" or "corner"
+  targetValueCode   String?  // specific target value or null for entire option
+  reason            String?
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([productId, triggerOptionCode])
+}
+
+model PriceVersion {
+  id              String   @id @default(uuid())
+  productId       String
+  product         Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  versionNumber   Int      @default(1)
+  versionLabel    String   // "v1.0.0 - Baseline", "v2.0.0 - Cost Adjustment"
+  pricingModel    String   @default("MATRIX") // MATRIX, TIERED_SLABS, FORMULA, BASE_PLUS_ADDONS
+  snapshotData    String   // Full JSON snapshot of pricing matrix + slabs + options
+  isActive        Boolean  @default(true)
+  activatedAt     DateTime @default(now())
+  changedByUserId String?
+  changedBy       User?    @relation(fields: [changedByUserId], references: [id])
+  changeReason    String?
+  createdAt       DateTime @default(now())
+
+  @@index([productId, versionNumber])
+}
+
+model Banner {
+  id               String    @id @default(uuid())
+  title            String
+  subtitle         String?
+  desktopImageUrl  String
+  mobileImageUrl   String?
+  buttonText       String?   @default("Shop Now")
+  buttonUrl        String?   @default("/shop")
+  displayOrder     Int       @default(0)
+  isActive         Boolean   @default(true)
+  startDate        DateTime?
+  endDate          DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+}
+
+model Review {
+  id             String   @id @default(uuid())
+  productId      String?
+  product        Product? @relation(fields: [productId], references: [id])
+  customerName   String
+  customerAvatar String?
+  rating         Int      @default(5)
+  reviewText     String
+  source         String   @default("GOOGLE") // GOOGLE, DIRECT
+  isFeatured     Boolean  @default(false)
+  isApproved     Boolean  @default(true)
+  createdAt      DateTime @default(now())
+}
+
+model Customer {
+  id                   String            @id @default(uuid())
+  name                 String
+  email                String?           @unique
+  passwordHash         String?
+  mobile               String
+  whatsapp             String?
+  accountType          String            @default("B2C_RETAIL") // B2C_RETAIL, B2B_CORPORATE
+  companyName          String?
+  gstNumber            String?
+  businessPan          String?
+  isVerifiedCorporate  Boolean           @default(false)
+  corporateDiscountPct Float             @default(0)
+  creditLimit          Float             @default(0)
+  address              String?
+  city                 String?
+  state                String?
+  pincode              String?
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+
+  orders               Order[]
+  carts                Cart[]
+  savedAddresses       CustomerAddress[]
+  authSessions         AuthSession[]
+}
+
+model CustomerAddress {
+  id            String   @id @default(uuid())
+  customerId    String
+  customer      Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  label         String   @default("Office / Branch")
+  recipientName String
+  mobile        String
+  street        String
+  city          String
+  state         String   @default("Tamil Nadu")
+  pincode       String
+  isDefault     Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model Cart {
+  id           String     @id @default(uuid())
+  sessionToken String     @unique
+  customerId   String?
+  customer     Customer?  @relation(fields: [customerId], references: [id])
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  items        CartItem[]
+}
+
+model CartItem {
+  id              String   @id @default(uuid())
+  cartId          String
+  cart            Cart     @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  productId       String
+  product         Product  @relation(fields: [productId], references: [id])
+  quantity        Int      @default(1)
+  selectedOptions String   // JSON string of selected options { "Printing Location": "Double Side", ... }
+  unitPrice       Float    @default(0)
+  totalPrice      Float    @default(0)
+  designRequired  Boolean  @default(false)
+  artworkFileUrl  String?
+  artworkOption        String?  @default("PRINT_READY_FILE") // PRINT_READY_FILE, DESIGN_SUPPORT
+  designPackageId      String?
+  designPackageName    String?
+  designCharge         Float?   @default(0)
+  designBriefResponses String?  // JSON string
+  designAssets         String?  // JSON string
+  termsAccepted        Boolean? @default(false)
+  termsAcceptedAt      DateTime?
+  selectedAddons       String?  // JSON string array of selected add-ons [{ id, name, price }]
+  preferredStyle       String?
+  preferredColor       String?
+  requirementNotes     String?
+  createdAt       DateTime @default(now())
+}
+
+model Order {
+  id                    String               @id @default(uuid())
+  orderNumber           String               @unique // PB-ORD-2026-000001
+  customerId            String?
+  customer              Customer?            @relation(fields: [customerId], references: [id])
+  customerName          String
+  customerEmail         String
+  customerMobile        String
+  customerWhatsapp      String?
+  shippingAddress       String               // JSON string
+  billingAddress        String?              // JSON string
+  gstNumber             String?
+  subtotal              Float
+  discountAmount        Float                @default(0)
+  shippingCharge        Float                @default(0)
+  cgstAmount            Float                @default(0)
+  sgstAmount            Float                @default(0)
+  igstAmount            Float                @default(0)
+  totalTax              Float                @default(0)
+  grandTotal            Float
+  paymentStatus         String               @default("PENDING") // PENDING, CONFIRMED, FAILED
+  orderStatus           String               @default("ORDER_RECEIVED") // ORDER_RECEIVED, CONFIRMED, ARTWORK_REQUIRED, DESIGN_IN_PROGRESS, PRODUCTION_QUEUE, PRINTING, FINISHING, QC, PACKED, READY_FOR_DELIVERY, OUT_FOR_DELIVERY, DELIVERED, CANCELLED, ON_HOLD
+  deliveryType          String               @default("LOCAL_DELIVERY") // LOCAL_DELIVERY, COURIER, PICKUP
+  trackingReference     String?
+  estimatedDeliveryDate DateTime?
+
+  // In-House ERP Multi-Department Workflow fields
+  currentDepartment     String               @default("DESIGN") // DESIGN, PRODUCTION, FINISHING_QC, PACKING, DELIVERY, COMPLETED
+  assignedStaffName     String?              // Staff member assigned
+  machineNumber         String?              // Press machine assigned
+  proofFileUrl          String?              // Digital proof URL
+  proofStatus           String?              @default("PENDING") // PENDING, SENT_TO_CUSTOMER, APPROVED, REVISION_REQUESTED
+  proofApprovedAt       DateTime?
+  packingWeight         String?              // Parcel weight & box count
+  courierPartner        String?              // Courier partner / Local delivery
+  trackingUrl           String?              // Direct tracking link
+
+  // Advanced Logistics & Delivery Management
+  deliveryMethod        String?              @default("COURIER") // COURIER, STORE_PICKUP
+  pickupLocation        String?
+  pickupReadyAt         DateTime?
+  pickedUpAt            DateTime?
+  pickupVerifiedBy      String?
+  estimatedDispatchDate DateTime?
+  productionDays        Int?                 @default(3)
+  transitDays           Int?                 @default(2)
+
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+
+  items                 OrderItem[]
+  statusHistory         OrderStatusHistory[]
+  notes                 OrderNote[]
+  payments              Payment[]
+  designOrders          DesignOrder[]
+  productionJobs        ProductionJob[]
+  qualityChecks         QualityCheck[]
+  shipments             Shipment[]
+  invoices              Invoice[]
+}
+
+model OrderItem {
+  id                     String  @id @default(uuid())
+  orderId                String
+  order                  Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId              String
+  product                Product @relation(fields: [productId], references: [id])
+  productNameSnapshot    String
+  skuSnapshot            String
+  quantity               Int
+  unitPriceSnapshot      Float
+  totalPriceSnapshot     Float
+  designRequired         Boolean @default(false)
+  artworkFileUrl         String?
+  artworkOption          String? @default("PRINT_READY_FILE") // PRINT_READY_FILE, DESIGN_SUPPORT
+  designPackageId        String?
+  designPackageName      String?
+  designCharge           Float?  @default(0)
+  designBriefResponses   String? // JSON string
+  designAssets           String? // JSON string
+  termsAccepted          Boolean? @default(false)
+  termsAcceptedAt        DateTime?
+  selectedAddons         String? // JSON string array of selected add-ons [{ id, name, price }]
+  designJobNumber        String? // e.g. PB-DES-2026-00001
+  preferredStyle         String?
+  preferredColor         String?
+  requirementNotes       String?
+  specificationsSnapshot String? // JSON string
+  optionsSnapshot        String? // JSON string
+  configurationSnapshot  String? // JSON string of immutable option configuration & pricing breakdown
+  designOrders           DesignOrder[]
+  productionJobs         ProductionJob[]
+}
+
+model OrderStatusHistory {
+  id              String   @id @default(uuid())
+  orderId         String
+  order           Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  previousStatus  String?
+  newStatus       String
+  changedByUserId String?
+  changedBy       User?    @relation(fields: [changedByUserId], references: [id])
+  note            String?
+  createdAt       DateTime @default(now())
+}
+
+model OrderNote {
+  id             String   @id @default(uuid())
+  orderId        String
+  order          Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  userId         String?
+  user           User?    @relation(fields: [userId], references: [id])
+  noteText       String
+  isInternalOnly Boolean  @default(true)
+  createdAt      DateTime @default(now())
+}
+
+model Payment {
+  id              String   @id @default(uuid())
+  orderId         String
+  order           Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  paymentMethod   String   @default("UPI") // UPI, CASH, NET_BANKING, MANUAL
+  transactionId   String?
+  amount          Float
+  status          String   @default("PENDING") // PENDING, SUCCESS, FAILED
+  paymentMetadata String?  // JSON string
+  createdAt       DateTime @default(now())
+}
+
+model StoreSetting {
+  id          String   @id @default(uuid())
+  key         String   @unique
+  value       String   // JSON string or plain text
+  description String?
+  updatedAt   DateTime @updatedAt
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id])
+  action     String
+  entityName String
+  entityId   String?
+  oldValues  String?  // JSON string
+  newValues  String?  // JSON string
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+}
+
+// ==========================================
+// PHASE 16: PRODUCT ARTWORK & DESIGN SUPPORT MODELS
+// ==========================================
+
+model ProductArtworkSetting {
+  id                  String   @id @default(uuid())
+  productId           String   @unique
+  product             Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  enablePrintReady    Boolean  @default(true)
+  enableDesignSupport Boolean  @default(true)
+  acceptedFormats     String   @default("PDF,AI,CDR,PSD,PNG,JPG")
+  maxFileSizeMb       Float    @default(100.0)
+  minFileSizeMb       Float?
+  printWidth          Float?
+  printHeight         Float?
+  sizeUnit            String   @default("inches") // inches, mm, cm, ft
+  bleed               String?  @default("0.125 inches on all sides")
+  safeMargin          String?  @default("0.125 inches")
+  resolutionDpi       Int      @default(300)
+  colorMode           String   @default("CMYK") // CMYK, RGB
+  fontInstructions    String?  @default("Convert all text to curves/outlines or embed fonts")
+  specialInstructions String?
+  designTerms         String?  // Custom terms text or markdown
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}
+
+model ProductDesignPackage {
+  id                       String   @id @default(uuid())
+  productId                String
+  product                  Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  packageName              String   // e.g., "Basic Design", "Premium Design"
+  description              String?
+  designCharge             Float    @default(300.0) // Single Side Design Charge
+  doubleSideDesignCharge   Float?   // Double Side Design Charge
+  initialConcepts          Int      @default(1)
+  revisionsIncluded        Int      @default(1)
+  additionalRevisionCharge Float    @default(100.0)
+  estimatedTime            String   @default("1 Business Day")
+  includedServices         String?  // JSON string or bullet points
+  excludedServices         String?  // JSON string or bullet points
+  termsAndConditions       String?
+  displayOrder             Int      @default(0)
+  isActive                 Boolean  @default(true)
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+}
+
+model ProductDesignBriefField {
+  id           String   @id @default(uuid())
+  productId    String
+  product      Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  fieldLabel   String   // e.g., "Company Name", "Logo File"
+  fieldKey     String   // e.g., "company_name", "logo_file"
+  fieldType    String   @default("SINGLE_LINE_TEXT") // SINGLE_LINE_TEXT, MULTI_LINE_TEXT, NUMBER, EMAIL, PHONE, SELECT, CHECKBOX, RADIO, DATE, FILE_UPLOAD
+  placeholder  String?
+  isRequired   Boolean  @default(false)
+  helpText     String?
+  optionsJson  String?  // JSON array string for options
+  displayOrder Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model ArtworkUpload {
+  id              String   @id @default(uuid())
+  fileName        String
+  originalName    String
+  fileType        String
+  fileSize        Int      // size in bytes
+  storageLocation String   // Supabase Storage path or local path
+  fileUrl         String
+  productId       String?
+  product         Product? @relation(fields: [productId], references: [id])
+  customerId      String?
+  cartItemId      String?
+  orderId         String?
+  dpi             Int?
+  width           Int?
+  height          Int?
+  createdAt       DateTime @default(now())
+}
+
+// ==========================================
+// CENTRALIZED DESIGN PACKAGE MANAGEMENT MODELS
+// ==========================================
+
+model DesignPackage {
+  id                    String   @id @default(uuid())
+  name                  String   // e.g. "Basic", "Standard", "Premium"
+  badge                 String?  // e.g. "MOST POPULAR", "BEST VALUE"
+  shortDescription      String?
+  detailedDescription   String?
+  packageIcon           String?  // icon or image url
+  basePrice             Float    @default(299.0) // Single Side Design Price
+  doubleSidePrice       Float?   @default(499.0) // Double Side Design Price
+  offerPrice            Float?   // Optional discounted price
+  concepts              Int      @default(1)
+  revisions             Int      @default(1) // -1 for unlimited
+  deliveryDays          Int      @default(2)
+  deliveryTimeText      String?  @default("2 Working Days")
+  expressDeliveryTime   String?  @default("24 Hours")
+  expressDeliveryCharge Float?   @default(250.0)
+  featuresJson          String?  // JSON array string: ["2 Initial Concepts", "Print-ready PDF", "PNG + JPG", ...]
+  sortOrder             Int      @default(0)
+  isActive              Boolean  @default(true)
+  isDefault             Boolean  @default(false)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  productMappings       ProductDesignPackageMapping[]
+  designOrders          DesignOrder[]
+}
+
+model DesignAddon {
+  id          String   @id @default(uuid())
+  name        String   // e.g. "Extra Revision", "Source File", "Extra Concept", "Express Delivery", "Content Writing", "Image Editing"
+  price       Float    @default(150.0)
+  description String?
+  badge       String?  // e.g. "Recommended"
+  sortOrder   Int      @default(0)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model ProductDesignPackageMapping {
+  id                    String        @id @default(uuid())
+  productId             String
+  product               Product       @relation(fields: [productId], references: [id], onDelete: Cascade)
+  packageId             String
+  designPackage         DesignPackage @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  customPrice           Float?        // Optional product-specific single side price override
+  customDoubleSidePrice Float?        // Optional product-specific double side price override
+  sortOrder             Int           @default(0)
+  isDefault             Boolean       @default(false)
+  isActive              Boolean       @default(true)
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+
+  @@unique([productId, packageId])
+}
+
+model DesignOrder {
+  id                  String           @id @default(uuid())
+  designJobNumber     String           @unique // e.g. PB-DES-2026-00001
+  orderId             String
+  order               Order            @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderItemId         String?
+  orderItem           OrderItem?       @relation(fields: [orderItemId], references: [id], onDelete: SetNull)
+  productId           String?
+  product             Product?         @relation(fields: [productId], references: [id])
+  packageId           String?
+  designPackage       DesignPackage?   @relation(fields: [packageId], references: [id])
+  packageNameSnapshot String
+  packagePriceSnapshot Float
+  packageSnapshotJson String?          // Complete JSON snapshot
+  addonsSnapshotJson  String?          // JSON snapshot of selected add-ons
+  requirementNotes    String?          // "What do you need?" text
+  preferredStyle      String?          // Corporate, Modern, Minimal, Luxury, Creative, Traditional, Designer Choice
+  preferredColor      String?          // Customer specified, Designer choice, Colour picker
+  briefResponsesJson  String?          // Dynamic product brief responses JSON
+  uploadedAssetsJson  String?          // Logo, content, reference designs uploaded JSON
+  designerId          String?
+  designer            User?            @relation(fields: [designerId], references: [id])
+  status              String           @default("REQUIREMENT_RECEIVED") // REQUIREMENT_RECEIVED, DESIGNER_ASSIGNED, DESIGNING, DRAFT_READY, CUSTOMER_REVIEW, REVISION, APPROVED, FINAL_DESIGN_READY, COMPLETED, CANCELLED
+  priority            String           @default("NORMAL") // LOW, NORMAL, HIGH, URGENT
+  deadline            DateTime?
+  approvedAt          DateTime?
+  finalFilesJson      String?          // JSON array of final delivery files
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+
+  revisions           DesignRevision[]
+}
+
+model DesignRevision {
+  id               String      @id @default(uuid())
+  designOrderId    String
+  designOrder      DesignOrder @relation(fields: [designOrderId], references: [id], onDelete: Cascade)
+  revisionNumber   Int         @default(1)
+  customerComment  String?
+  designerResponse String?
+  draftFileUrl     String?
+  status           String      @default("PENDING_REVIEW") // PENDING_REVIEW, REVISION_REQUESTED, APPROVED
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+}
+
+// ==========================================
+// ORDER OPERATIONS, PRODUCTION JOB CARD, QC & LOGISTICS
+// ==========================================
+
+model ProductionJob {
+  id                         String         @id @default(uuid())
+  jobNumber                  String         @unique // e.g. PB-JOB-2026-00001
+  orderId                    String
+  order                      Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderItemId                String?
+  orderItem                  OrderItem?     @relation(fields: [orderItemId], references: [id], onDelete: SetNull)
+  productId                  String?
+  product                    Product?       @relation(fields: [productId], references: [id])
+  productNameSnapshot        String
+  quantity                   Int
+  priority                   String         @default("STANDARD") // STANDARD, EXPRESS, URGENT
+  status                     String         @default("QUEUED") // WAITING_FOR_DESIGN_APPROVAL, QUEUED, ASSIGNED, PRINTING, PRINTING_COMPLETED, FINISHING, FINISHING_COMPLETED, SENT_TO_QC, COMPLETED, ON_HOLD, REJECTED
+  assignedStaffName          String?
+  machineNumber              String?        // Press machine assigned
+  specsSnapshotJson          String?        // Detailed production specs JSON { size, gsm, paperStock, printingSide, lamination, finishing, specialProcesses }
+  customizationSnapshotJson  String?        // Exact customer customization text JSON { name, company, designation, phone, notes }
+  approvedArtworkUrl         String?        // Approved print file URL
+  approvedArtworkVersion     String?        @default("V1 - Approved")
+  artworkStatus              String?        @default("APPROVED") // APPROVED, WAITING_APPROVAL
+  deadline                   DateTime?
+  startedAt                  DateTime?
+  completedAt                DateTime?
+  notes                      String?
+  createdAt                  DateTime       @default(now())
+  updatedAt                  DateTime       @updatedAt
+
+  qualityChecks              QualityCheck[]
+}
+
+model QualityCheck {
+  id                String         @id @default(uuid())
+  qcNumber          String         @unique // e.g. PB-QC-2026-00001
+  orderId           String
+  order             Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productionJobId   String?
+  productionJob     ProductionJob? @relation(fields: [productionJobId], references: [id], onDelete: SetNull)
+  inspectorName     String?
+  status            String         @default("PENDING") // PENDING, PASSED, FAILED
+  checklistJson     String?        // JSON checklist: { correctQuantity: true, correctSize: true, correctMaterial: true, correctColour: true, correctLamination: true, correctFinishing: true, noDamage: true, correctCustomization: true, matchesApprovedArtwork: true }
+  failureReason     String?        // COLOUR_ISSUE, QUANTITY_ISSUE, FINISHING_ISSUE, DAMAGE, WRONG_ARTWORK, OTHER
+  failureNotes      String?
+  inspectedAt       DateTime?
+  createdAt         DateTime       @default(now())
+}
+
+model Shipment {
+  id                    String    @id @default(uuid())
+  shipmentNumber        String    @unique // e.g. PB-SHIP-2026-00001
+  orderId               String
+  order                 Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  deliveryMethod        String    @default("COURIER") // COURIER, STORE_PICKUP
+  recipientName         String
+  mobile                String
+  altMobile             String?
+  companyName           String?
+  fullAddress           String
+  landmark              String?
+  city                  String
+  state                 String
+  pincode               String
+  courierPartner        String?   // DTDC, ST Courier, Professional Courier, Blue Dart, Delhivery, India Post, Local Delivery
+  trackingNumber        String?
+  trackingUrl           String?
+  packageCount          Int       @default(1)
+  packageWeightKg       Float?
+  boxDimensions         String?
+  dispatchDate          DateTime?
+  expectedDeliveryDate  DateTime?
+  deliveredAt           DateTime?
+  status                String    @default("PENDING") // PENDING, PACKED, READY_FOR_DISPATCH, SHIPPED, OUT_FOR_DELIVERY, DELIVERED, READY_FOR_PICKUP, PICKED_UP, RETURNED, FAILED
+  dispatchStaffName     String?
+  pickupLocation        String?
+  pickupReadyAt         DateTime?
+  pickedUpAt            DateTime?
+  handoverStaffName     String?
+  verifiedCustomerName  String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+}
+
+model Invoice {
+  id                    String    @id @default(uuid())
+  invoiceNumber         String    @unique // e.g. PB-INV-2026-00001
+  orderId               String
+  order                 Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  invoiceType           String    @default("ORDER_RECEIPT") // ORDER_RECEIPT, TAX_INVOICE
+  companyDetailsJson    String?   // Print Bazzar Trichy address, GSTIN, phone, email, website
+  billToSnapshotJson    String?   // Customer name, company, mobile, email, billing address, GSTIN
+  shipToSnapshotJson    String?   // Shipping address / Store pickup snapshot
+  itemsSnapshotJson     String?   // Items snapshot JSON array
+  subtotal              Float
+  taxableAmount         Float
+  cgst                  Float     @default(0)
+  sgst                  Float     @default(0)
+  igst                  Float     @default(0)
+  totalTax              Float     @default(0)
+  shippingCharge        Float     @default(0)
+  grandTotal            Float
+  amountPaid            Float     @default(0)
+  balanceDue            Float     @default(0)
+  paymentStatus         String    @default("PAID") // PAID, PARTIALLY_PAID, PENDING
+  paymentMethod         String    @default("UPI")
+  transactionReference  String?
+  invoiceDate           DateTime  @default(now())
+  createdAt             DateTime  @default(now())
+}
+
+model AuthSession {
+  id            String    @id @default(uuid())
+  userType      String    // "STAFF" or "CUSTOMER"
+  userId        String?
+  customerId    String?
+  tokenHash     String    @unique // SHA-256 hash of active refresh token
+  familyId      String    // Session family ID for reuse detection
+  ipAddress     String?
+  userAgent     String?
+  revoked       Boolean   @default(false)
+  revokedAt     DateTime?
+  revokedReason String?
+  expiresAt     DateTime
+  lastUsedAt    DateTime  @default(now())
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  user          User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  customer      Customer? @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([customerId])
+  @@index([familyId])
+}
+
+
+
