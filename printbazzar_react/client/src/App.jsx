@@ -234,6 +234,14 @@ function App() {
             }
           />
           <Route
+            path="/products"
+            element={
+              <StorefrontLayout>
+                <Shop />
+              </StorefrontLayout>
+            }
+          />
+          <Route
             path="/category/:categoryName"
             element={
               <StorefrontLayout>
