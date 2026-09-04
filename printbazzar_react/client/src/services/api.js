@@ -1,4 +1,7 @@
-const API_BASE_URL = import.meta.env.VITE_API_URL || (typeof window !== 'undefined' ? `${window.location.origin}/api/v1` : 'http://localhost:5000/api/v1');
+// Prefer same-origin /api/v1 so Vercel rewrites proxy transparently to live Render backend with zero CORS/cookie issues
+const API_BASE_URL = typeof window !== 'undefined'
+  ? `${window.location.origin}/api/v1`
+  : (import.meta.env.VITE_API_URL || 'https://printbazzar-api.onrender.com/api/v1');
 
 function getCsrfToken() {
   if (typeof document === 'undefined') return null;
