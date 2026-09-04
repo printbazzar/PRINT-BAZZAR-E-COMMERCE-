@@ -1,0 +1,424 @@
+import { Route, Routes, useLocation, Navigate, useParams } from "react-router-dom";
+import { useState, useEffect } from "react";
+import Home from "./Pages/Home";
+import Header from "./Components/Header";
+import { Category } from "./Pages/Category";
+import Shop from "./Pages/Shop";
+import ProductDetail from "./Pages/ProductDetail";
+import Cart from "./Pages/Cart";
+import Checkout from "./Pages/Checkout";
+import OrderConfirmation from "./Pages/OrderConfirmation";
+import TrackOrder from "./Pages/TrackOrder";
+import FooterCom from "./Components/FooterComp";
+import ScrollToTop from "./Components/ScrollToTop";
+import Whatsapp from "./Components/WhatsappIcon";
+import Contact from "./Pages/Contact";
+import Search from "./Components/Search";
+import Missing from "./Pages/Missing";
+import AboutUs from "./Pages/AboutUs";
+import Preloader from "./Components/Preloader";
+import { CartDrawer } from "./Components/CartDrawer";
+import { CartProvider } from "./context/CartContext";
+import { AuthProvider } from "./context/AuthContext";
+import { CustomerAuthProvider } from "./context/CustomerAuthContext";
+import { BusinessInfoProvider } from "./context/BusinessInfoContext";
+
+import InvoiceView from "./Pages/InvoiceView";
+import MobileBottomNav from "./Components/MobileBottomNav";
+
+// Customer Auth & Portal Pages
+import CustomerLogin from "./Pages/CustomerLogin";
+import CustomerSignup from "./Pages/CustomerSignup";
+import CustomerDashboard from "./Pages/CustomerDashboard";
+
+// Admin Module
+import AdminLayout from "./admin/AdminLayout";
+import AdminLogin from "./admin/AdminLogin";
+import AdminDashboard from "./admin/AdminDashboard";
+import AdminProducts from "./admin/AdminProducts";
+import AdminProductEditor from "./admin/AdminProductEditor";
+import AdminCategories from "./admin/AdminCategories";
+import AdminBanners from "./admin/AdminBanners";
+import AdminOrders from "./admin/AdminOrders";
+import AdminOrderDetail from "./admin/AdminOrderDetail";
+import AdminWorkflowBoard from "./admin/AdminWorkflowBoard";
+import AdminStaffManagement from "./admin/AdminStaffManagement";
+import AdminPriceManagement from "./admin/AdminPriceManagement";
+import AdminDesignServices from "./admin/AdminDesignServices";
+import AdminSettings from "./admin/AdminSettings";
+import AdminFooterSettings from "./admin/AdminFooterSettings";
+import AdminBusinessSettings from "./admin/AdminBusinessSettings";
+import AdminAuditLogs from "./admin/AdminAuditLogs";
+import AdminProductConfigurator from "./admin/AdminProductConfigurator";
+import AdminOptionMasterManager from "./admin/AdminOptionMasterManager";
+import StaffQueue from "./Pages/StaffQueue";
+import PolicyPage from "./Pages/PolicyPage";
+import QuoteRequestPage from "./Pages/QuoteRequestPage";
+
+// Legacy route redirect component (e.g. /StandardCardDetails -> /product/standard-card)
+function LegacyRouteRedirect({ targetSlug }) {
+  return <Navigate to={`/product/${targetSlug}`} replace />;
+}
+
+function StorefrontLayout({ children }) {
+  return (
+    <>
+      <ScrollToTop />
+      <Header />
+      <div className="block lg:hidden px-4 py-2 bg-black">
+        <Search />
+      </div>
+      <main className="min-h-[70vh] pb-16 lg:pb-0">{children}</main>
+      <FooterCom />
+      <Whatsapp />
+      <CartDrawer />
+      <MobileBottomNav />
+    </>
+  );
+}
+
+function App() {
+  const [loading, setLoading] = useState(true);
+  const location = useLocation();
+  const path = location.pathname;
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setLoading(false);
+    }, 600);
+    return () => clearTimeout(timer);
+  }, []);
+
+  if (loading) {
+    return <Preloader />;
+  }
+
+  // Dynamic Document Title
+  if (path === "/") {
+    document.title = "Print Bazzar | Online Custom Printing & Graphic Design";
+  } else if (path === "/shop") {
+    document.title = "Print Catalogue & Categories | Print Bazzar";
+  } else if (path.startsWith("/product/")) {
+    document.title = "Customize & Order | Print Bazzar";
+  } else if (path === "/cart") {
+    document.title = "Shopping Cart | Print Bazzar";
+  } else if (path === "/checkout") {
+    document.title = "Secure Checkout | Print Bazzar";
+  } else if (path.startsWith("/admin")) {
+    document.title = "Print Bazzar Admin Control Panel";
+  }
+
+  const legacyRouteList = [
+    { path: "/StandardCardDetails", target: "standard-card" },
+    { path: "/LaminatedCardDetails", target: "laminated-card" },
+    { path: "/EconomicalCardDetails", target: "economical-card" },
+    { path: "/TexturedCardDetails", target: "textured-card" },
+    { path: "/SquareCardDetails", target: "square-card" },
+    { path: "/MetallicCardDetails", target: "metallic-card" },
+    { path: "/FoilCardDetails", target: "foil-card" },
+    { path: "/RaisedUVCardDetails", target: "raised-uv-card" },
+    { path: "/SpotUVCardDetails", target: "spot-uv-card" },
+    { path: "/SyntheticCardDetails", target: "synthetic-card" },
+    { path: "/BulkSyntheticCardDetails", target: "bulk-synthetic-card" },
+    { path: "/PremiumSpotUVCardDetails", target: "premium-spot-uv-card" },
+    { path: "/DieCuttingCardDetails", target: "die-cutting-card" },
+    { path: "/TranslucentCardDetails", target: "translucent-card" },
+    { path: "/PerfumedCardDetails", target: "perfumed-card" },
+    { path: "/PlantablePaperCardDetails", target: "plantable-paper-card" },
+    { path: "/LetterHeadDetails", target: "letter-head" },
+    { path: "/BillBookDetails", target: "bill-book" },
+    { path: "/BannersDetails", target: "banners" },
+    { path: "/CircleStickersDetails", target: "circle-stickers" },
+    { path: "/CustomShapeStickersDetails", target: "custom-shape-stickers" },
+    { path: "/CustomShapeStickers", target: "custom-shape-stickers" },
+    { path: "/A4MultiColorFlyersDetails", target: "a4-multi-color-flyers" },
+    { path: "/RollupStandeeDetails", target: "rollup-standee" },
+    { path: "/IDCardDetails", target: "id-card" },
+    { path: "/IDCardsSetDetails", target: "id-cards-set" },
+    { path: "/LanyardsDetails", target: "lanyards" },
+    { path: "/StandardCertificatesDetails", target: "standard-certificates" },
+    { path: "/PremiumCertificatesDetails", target: "premium-certificates" },
+    { path: "/WeddingInvitationDetails", target: "wedding-invitation" },
+    { path: "/BirthdayInvitationDetails", target: "birthday-invitation" },
+    { path: "/BusinessInvitationDetails", target: "business-invitation" },
+  ];
+
+  return (
+    <BusinessInfoProvider>
+      <CustomerAuthProvider>
+        <AuthProvider>
+          <CartProvider>
+            <Routes>
+            {/* ========================================== */}
+            {/* ADMIN PORTAL ROUTES */}
+            {/* ========================================== */}
+            <Route path="/admin/login" element={<AdminLogin />} />
+            <Route path="/admin" element={<AdminLayout />}>
+              <Route index element={<Navigate to="/admin/dashboard" replace />} />
+              <Route path="dashboard" element={<AdminDashboard />} />
+              <Route path="workflow" element={<AdminWorkflowBoard />} />
+              <Route path="queue" element={<StaffQueue />} />
+              <Route path="staff" element={<AdminStaffManagement />} />
+              <Route path="products" element={<AdminProducts />} />
+              <Route path="pricing" element={<AdminPriceManagement />} />
+              <Route path="design-services" element={<AdminDesignServices />} />
+              <Route path="design-packages" element={<AdminDesignServices />} />
+              <Route path="products/new" element={<AdminProductEditor />} />
+              <Route path="products/edit/:id" element={<AdminProductEditor />} />
+              <Route path="products/:id/configuration" element={<AdminProductConfigurator />} />
+              <Route path="options-master" element={<AdminOptionMasterManager />} />
+              <Route path="categories" element={<AdminCategories />} />
+              <Route path="banners" element={<AdminBanners />} />
+              <Route path="orders" element={<AdminOrders />} />
+              <Route path="orders/:id" element={<AdminOrderDetail />} />
+              <Route path="settings" element={<AdminSettings />} />
+              <Route path="footer-settings" element={<AdminFooterSettings />} />
+              <Route path="business-settings" element={<AdminBusinessSettings />} />
+              <Route path="audit-logs" element={<AdminAuditLogs />} />
+            </Route>
+          <Route path="/staff/queue" element={<StaffQueue />} />
+
+          {/* ========================================== */}
+          {/* CUSTOMER & CORPORATE PORTAL ROUTES */}
+          {/* ========================================== */}
+          <Route
+            path="/account/login"
+            element={
+              <StorefrontLayout>
+                <CustomerLogin />
+              </StorefrontLayout>
+            }
+          />
+          <Route
+            path="/account/signup"
+            element={
+              <StorefrontLayout>
+                <CustomerSignup />
+              </StorefrontLayout>
+            }
+          />
+          <Route
+            path="/account/dashboard"
+            element={
+              <StorefrontLayout>
+                <CustomerDashboard />
+              </StorefrontLayout>
+            }
+          />
+          <Route
+            path="/account/orders"
+            element={
+              <StorefrontLayout>
+                <CustomerDashboard />
+              </StorefrontLayout>
+            }
+          />
+
+          {/* ========================================== */}
+          {/* STOREFRONT ROUTES */}
+          {/* ========================================== */}
+          <Route
+            path="/"
+            element={
+              <StorefrontLayout>
+                <Home />
+              </StorefrontLayout>
+            }
+          />
+          <Route
+            path="/shop"
+            element={
+              <StorefrontLayout>
+                <Shop />
+              </StorefrontLayout>
+            }
+          />
+          <Route
+            path="/category/:categoryName"
+            element={
+              <StorefrontLayout>
+                <Category />
+              </StorefrontLayout>
+            }
+          />
+          <Route
+            path="/product/:slug"
+            element={
+              <StorefrontLayout>
+                <ProductDetail />
+              </StorefrontLayout>
+            }
+          />
+          <Route
+            path="/cart"
+            element={
+              <StorefrontLayout>
+                <Cart />
+              </StorefrontLayout>
+            }
+          />
+          <Route
+            path="/checkout"
+            element={
+              <StorefrontLayout>
+                <Checkout />
+              </StorefrontLayout>
+            }
+          />
+          <Route
+            path="/order-confirmation/:orderNumber"
+            element={
+              <StorefrontLayout>
+                <OrderConfirmation />
+              </StorefrontLayout>
+            }
+          />
+          <Route
+            path="/invoice/:orderId"
+            element={<InvoiceView />}
+          />
+          <Route
+            path="/track-order"
+            element={
+              <StorefrontLayout>
+                <TrackOrder />
+              </StorefrontLayout>
+            }
+          />
+          <Route
+            path="/track-order/:orderIdentifier"
+            element={
+              <StorefrontLayout>
+                <TrackOrder />
+              </StorefrontLayout>
+            }
+          />
+          <Route
+            path="/about-us"
+            element={
+              <StorefrontLayout>
+                <AboutUs />
+              </StorefrontLayout>
+            }
+          />
+          <Route
+            path="/contact-us"
+            element={
+              <StorefrontLayout>
+                <Contact />
+              </StorefrontLayout>
+            }
+          />
+          <Route
+            path="/terms"
+            element={
+              <StorefrontLayout>
+                <PolicyPage />
+              </StorefrontLayout>
+            }
+          />
+          <Route
+            path="/privacy"
+            element={
+              <StorefrontLayout>
+                <PolicyPage />
+              </StorefrontLayout>
+            }
+          />
+          <Route
+            path="/shipping-policy"
+            element={
+              <StorefrontLayout>
+                <PolicyPage />
+              </StorefrontLayout>
+            }
+          />
+          <Route
+            path="/refund-policy"
+            element={
+              <StorefrontLayout>
+                <PolicyPage />
+              </StorefrontLayout>
+            }
+          />
+          <Route
+            path="/cancellation-policy"
+            element={
+              <StorefrontLayout>
+                <PolicyPage />
+              </StorefrontLayout>
+            }
+          />
+          <Route
+            path="/cookie-policy"
+            element={
+              <StorefrontLayout>
+                <PolicyPage />
+              </StorefrontLayout>
+            }
+          />
+          <Route
+            path="/policy/:slug"
+            element={
+              <StorefrontLayout>
+                <PolicyPage />
+              </StorefrontLayout>
+            }
+          />
+          <Route
+            path="/quote"
+            element={
+              <StorefrontLayout>
+                <QuoteRequestPage />
+              </StorefrontLayout>
+            }
+          />
+
+          {/* Legacy Routes Redirects */}
+          {legacyRouteList.map((leg, idx) => (
+            <Route
+              key={idx}
+              path={leg.path}
+              element={<LegacyRouteRedirect targetSlug={leg.target} />}
+            />
+          ))}
+
+          {/* Catch-all dynamic product or 404 */}
+          <Route
+            path="/:legacySlug"
+            element={
+              <StorefrontLayout>
+                <LegacyCatchAll />
+              </StorefrontLayout>
+            }
+          />
+          <Route
+            path="*"
+            element={
+              <StorefrontLayout>
+                <Missing />
+              </StorefrontLayout>
+            }
+          />
+        </Routes>
+          </CartProvider>
+        </AuthProvider>
+      </CustomerAuthProvider>
+    </BusinessInfoProvider>
+  );
+}
+
+// Fallback helper for legacy CamelCase details URLs e.g. /ViboothiCoverSingleColorDetails
+function LegacyCatchAll() {
+  const { legacySlug } = useParams();
+  if (legacySlug && legacySlug.toLowerCase().endsWith("details")) {
+    const slug = legacySlug
+      .replace(/Details$/i, "")
+      .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
+      .toLowerCase();
+    return <Navigate to={`/product/${slug}`} replace />;
+  }
+  return <Missing />;
+}
+
+export default App;
