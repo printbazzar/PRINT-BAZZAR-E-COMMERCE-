@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import compression from 'compression';
 import apiRouter from './routes/api.js';
 import { corsOptions } from './config/cors.js';
 import { configureSecurityHeaders } from './middleware/securityHeaders.js';
@@ -22,6 +23,29 @@ const PORT = process.env.PORT || 5000;
 
 // Trust first proxy (critical for reverse proxies, rate limiting & real IP resolution)
 app.set('trust proxy', 1);
+
+// GZIP Compression for ultra-fast payload delivery
+app.use(compression());
+
+// Edge CDN & Browser HTTP Caching for public store endpoints
+app.use((req, res, next) => {
+  if (req.method === 'GET') {
+    const p = req.path;
+    if (
+      p.includes('/categories') ||
+      p.includes('/settings/public') ||
+      p.includes('/settings/footer') ||
+      p.includes('/settings/business-info') ||
+      p.includes('/banners') ||
+      p.includes('/reviews')
+    ) {
+      res.setHeader('Cache-Control', 'public, max-age=120, stale-while-revalidate=600');
+    } else if (p.includes('/products') && !p.includes('/admin')) {
+      res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
+    }
+  }
+  next();
+});
 
 // 1. Enterprise HTTP Security Headers (Helmet + CSP + HSTS)
 app.use(configureSecurityHeaders());

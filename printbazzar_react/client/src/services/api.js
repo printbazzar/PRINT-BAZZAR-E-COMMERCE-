@@ -12,12 +12,68 @@ function getCsrfToken() {
 let isRefreshingAdmin = false;
 let isRefreshingCustomer = false;
 
+// Client-Side In-Memory Cache & In-Flight Request Deduplication for Ultra-Fast Page Navigation
+const apiCache = new Map();
+const inFlightRequests = new Map();
+
+export function clearApiCache(prefix = '') {
+  if (!prefix) {
+    apiCache.clear();
+  } else {
+    for (const key of apiCache.keys()) {
+      if (key.includes(prefix)) {
+        apiCache.delete(key);
+      }
+    }
+  }
+}
+
+function getCacheTtl(endpoint) {
+  if (endpoint.startsWith('/admin')) return 15 * 1000; // 15 seconds for admin queries
+  if (
+    endpoint.includes('/categories') ||
+    endpoint.includes('/settings') ||
+    endpoint.includes('/banners') ||
+    endpoint.includes('/reviews')
+  ) {
+    return 5 * 60 * 1000; // 5 minutes for stable public store metadata
+  }
+  if (endpoint.includes('/products')) {
+    return 2 * 60 * 1000; // 2 minutes for products
+  }
+  return 30 * 1000; // 30 seconds default for other GETs
+}
+
 async function request(endpoint, options = {}, isRetry = false) {
   const adminToken = typeof localStorage !== 'undefined' ? localStorage.getItem('pb_admin_token') : null;
   const customerToken = typeof localStorage !== 'undefined' ? localStorage.getItem('pb_customer_token') : null;
   const token = endpoint.startsWith('/customer/account') ? customerToken : (adminToken || customerToken);
 
   const method = (options.method || 'GET').toUpperCase();
+  const isGet = method === 'GET';
+  const cacheKey = `${endpoint}__${token || ''}`;
+
+  // Invalidate cache on mutations
+  if (!isGet) {
+    if (endpoint.includes('/products')) clearApiCache('/products');
+    if (endpoint.includes('/categories')) clearApiCache('/categories');
+    if (endpoint.includes('/orders')) clearApiCache('/orders');
+    if (endpoint.includes('/settings')) clearApiCache('/settings');
+    if (endpoint.includes('/admin')) clearApiCache('/admin');
+  }
+
+  // Return cached result if available and fresh
+  if (isGet && !options.noCache && !isRetry) {
+    const cached = apiCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < getCacheTtl(endpoint)) {
+      return Promise.resolve(cached.data);
+    }
+    // Return in-flight request if already in progress to avoid duplicate network calls
+    if (inFlightRequests.has(cacheKey)) {
+      return inFlightRequests.get(cacheKey);
+    }
+  }
+
   const csrfToken = getCsrfToken();
 
   const headers = {
@@ -37,9 +93,10 @@ async function request(endpoint, options = {}, isRetry = false) {
     config.body = JSON.stringify(options.body);
   }
 
-  try {
-    const res = await fetch(`${API_BASE_URL}${endpoint}`, config);
-    const data = await res.json();
+  const executeFetch = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}${endpoint}`, config);
+      const data = await res.json();
 
     // Transparent 401 session recovery via refresh token
     if (res.status === 401 && !isRetry) {
@@ -97,11 +154,26 @@ async function request(endpoint, options = {}, isRetry = false) {
     if (!res.ok) {
       throw new Error(data.message || 'API request failed');
     }
+
+    if (isGet && res.ok && !options.noCache) {
+      apiCache.set(cacheKey, { data, timestamp: Date.now() });
+    }
+
     return data;
   } catch (error) {
     console.error(`API error on ${endpoint}:`, error);
     throw error;
   }
+};
+
+  const fetchPromise = executeFetch();
+
+  if (isGet && !options.noCache && !isRetry) {
+    inFlightRequests.set(cacheKey, fetchPromise);
+    fetchPromise.finally(() => inFlightRequests.delete(cacheKey));
+  }
+
+  return fetchPromise;
 }
 
 export const api = {

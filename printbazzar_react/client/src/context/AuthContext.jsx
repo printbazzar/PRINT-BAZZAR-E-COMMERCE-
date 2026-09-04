@@ -8,22 +8,26 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Attempt profile fetch via secure HttpOnly cookie (or fallback token)
-    api
-      .getAdminProfile()
-      .then((res) => {
-        if (res.success && res.user) {
-          setAdminUser(res.user);
-        } else {
+    // Only attempt profile fetch if admin token is present to eliminate unnecessary 401s and network delay
+    if (localStorage.getItem('pb_admin_token')) {
+      api
+        .getAdminProfile()
+        .then((res) => {
+          if (res.success && res.user) {
+            setAdminUser(res.user);
+          } else {
+            setAdminUser(null);
+            localStorage.removeItem('pb_admin_token');
+          }
+        })
+        .catch(() => {
           setAdminUser(null);
           localStorage.removeItem('pb_admin_token');
-        }
-      })
-      .catch(() => {
-        setAdminUser(null);
-        localStorage.removeItem('pb_admin_token');
-      })
-      .finally(() => setLoading(false));
+        })
+        .finally(() => setLoading(false));
+    } else {
+      setLoading(false);
+    }
   }, []);
 
   const login = async (email, password) => {

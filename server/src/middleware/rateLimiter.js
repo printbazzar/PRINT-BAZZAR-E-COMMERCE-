@@ -76,10 +76,10 @@ export const orderCreationLimiter = rateLimit({
   handler: createRateLimitHandler('Order creation rate limit reached. Please wait a few moments before placing another order.'),
 });
 
-// 6. Public Storefront General API Limiter: 120 requests per 15 minutes
+// 6. Public Storefront General API Limiter: 3000 requests per 15 minutes (Optimized for SPA & CDN)
 export const publicApiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 120,
+  max: 3000,
   standardHeaders: true,
   legacyHeaders: false,
   skip: (req) => {
@@ -88,8 +88,16 @@ export const publicApiLimiter = rateLimit({
     if (process.env.NODE_ENV !== 'production' && (req.ip === '127.0.0.1' || req.ip === '::1' || req.ip === '::ffff:127.0.0.1')) {
       return true;
     }
+    // Never throttle admin dashboard or staff operations
+    if (req.path.startsWith('/admin') || req.path.includes('/admin') || req.headers.authorization) {
+      return true;
+    }
     // Never throttle static uploads or health checks
     if (req.path.startsWith('/uploads') || req.path === '/api/health') {
+      return true;
+    }
+    // Never throttle public read-only GET requests (e.g. browsing catalogue, categories, settings)
+    if (req.method === 'GET') {
       return true;
     }
     // Never throttle payment gateway webhooks or verification

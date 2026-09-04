@@ -9,8 +9,12 @@ export function CustomerAuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Attempt profile fetch via secure HttpOnly cookie (or fallback token)
-    fetchCustomerProfile();
+    // Only attempt profile fetch if customer token is present to eliminate unnecessary 401s and network delay
+    if (localStorage.getItem('pb_customer_token')) {
+      fetchCustomerProfile();
+    } else {
+      setLoading(false);
+    }
   }, []);
 
   const fetchCustomerProfile = async () => {

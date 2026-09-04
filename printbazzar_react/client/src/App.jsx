@@ -78,20 +78,8 @@ function StorefrontLayout({ children }) {
 }
 
 function App() {
-  const [loading, setLoading] = useState(true);
   const location = useLocation();
   const path = location.pathname;
-
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setLoading(false);
-    }, 600);
-    return () => clearTimeout(timer);
-  }, []);
-
-  if (loading) {
-    return <Preloader />;
-  }
 
   // Dynamic Document Title
   if (path === "/") {
