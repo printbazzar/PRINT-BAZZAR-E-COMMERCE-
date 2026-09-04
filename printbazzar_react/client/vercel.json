@@ -2,7 +2,11 @@
   "rewrites": [
     {
       "source": "/api/(.*)",
-      "destination": "https://api.printbazzar.online/api/$1"
+      "destination": "https://printbazzar-api.onrender.com/api/$1"
+    },
+    {
+      "source": "/uploads/(.*)",
+      "destination": "https://printbazzar-api.onrender.com/uploads/$1"
     },
     {
       "source": "/(.*)",
