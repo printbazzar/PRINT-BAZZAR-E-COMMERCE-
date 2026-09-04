@@ -7,6 +7,7 @@ import {
   HiOutlineQrcode,
   HiOutlineShieldCheck,
   HiOutlineSparkles,
+  HiOutlineExclamationCircle,
 } from 'react-icons/hi';
 import { api } from '../services/api';
 
@@ -102,6 +103,32 @@ export default function PaymentGatewayModal({
       }
     } catch (err) {
       setErrorMsg(err.message || 'Payment processing error.');
+      setIsVerifying(false);
+    }
+  };
+
+  const handleConvertToCod = async () => {
+    setIsVerifying(true);
+    setErrorMsg('');
+    try {
+      const res = await api.convertToCod({ orderNumber });
+      if (res.success) {
+        setPaymentSuccess(true);
+        setTimeout(() => {
+          if (onSuccess) {
+            onSuccess({
+              paymentStatus: res.paymentStatus || 'PENDING',
+              orderStatus: res.orderStatus || 'PRODUCTION_QUEUE',
+              paymentMethod: 'COD',
+            });
+          }
+        }, 1000);
+      } else {
+        setErrorMsg(res.message || 'Failed to confirm COD order.');
+        setIsVerifying(false);
+      }
+    } catch (err) {
+      setErrorMsg(err.message || 'Failed to confirm COD order.');
       setIsVerifying(false);
     }
   };
@@ -416,42 +443,75 @@ export default function PaymentGatewayModal({
               </div>
             )}
 
-            {/* Action Buttons */}
-            <div className="space-y-2 pt-2">
+            {/* Action Buttons & Gateway Status */}
+            <div className="space-y-2.5 pt-2">
               {sessionData?.isRealKeyConfigured ? (
-                <Button
-                  onClick={launchRazorpaySDK}
-                  disabled={isVerifying}
-                  className="w-full bg-yellow-400 hover:bg-yellow-500 text-black font-black py-1.5 rounded-xl shadow-md text-sm"
-                >
-                  {isVerifying ? (
-                    <div className="flex items-center gap-2">
-                      <Spinner size="sm" /> Verifying...
-                    </div>
-                  ) : (
-                    `Pay ₹${payableAmount.toLocaleString('en-IN')} via Razorpay`
-                  )}
-                </Button>
-              ) : null}
+                <>
+                  <Button
+                    onClick={launchRazorpaySDK}
+                    disabled={isVerifying}
+                    className="w-full bg-yellow-400 hover:bg-yellow-500 text-black font-black py-2 rounded-xl shadow-md text-sm flex items-center justify-center gap-2"
+                  >
+                    {isVerifying ? (
+                      <div className="flex items-center gap-2">
+                        <Spinner size="sm" /> Opening Razorpay...
+                      </div>
+                    ) : (
+                      `💳 Pay ₹${payableAmount.toLocaleString('en-IN')} via Razorpay`
+                    )}
+                  </Button>
 
-              <Button
-                onClick={() => handleProcessPayment(true)}
-                disabled={isVerifying}
-                color={sessionData?.isRealKeyConfigured ? 'light' : 'dark'}
-                className={`w-full font-black py-1.5 rounded-xl shadow-xs text-xs ${
-                  !sessionData?.isRealKeyConfigured
-                    ? 'bg-yellow-400 hover:bg-yellow-500 text-black'
-                    : 'text-gray-700'
-                }`}
-              >
-                {isVerifying ? (
-                  <div className="flex items-center gap-2">
-                    <Spinner size="sm" /> Verifying Payment...
+                  <Button
+                    onClick={handleConvertToCod}
+                    disabled={isVerifying}
+                    color="light"
+                    className="w-full border border-gray-300 hover:bg-gray-100 text-gray-700 font-bold py-1.5 rounded-xl text-xs"
+                  >
+                    💵 Pay via Cash on Delivery / Pay at Shop Instead
+                  </Button>
+                </>
+              ) : (
+                <div className="space-y-2">
+                  <div className="bg-amber-50 border border-amber-300 rounded-xl p-3 text-amber-900 text-xs space-y-1">
+                    <div className="flex items-center gap-1.5 font-bold text-amber-800">
+                      <HiOutlineExclamationCircle className="w-4 h-4 text-amber-600 flex-shrink-0" />
+                      <span>Razorpay Payment Gateway Not Connected Yet</span>
+                    </div>
+                    <p className="text-[11px] text-amber-700 leading-relaxed">
+                      Live Razorpay API keys (Key ID & Secret) have not been entered yet in <strong>Admin Panel &gt; Settings</strong>. You can confirm this order as <strong>Cash on Delivery / Pay at Shop</strong>, or run a test simulation.
+                    </p>
                   </div>
-                ) : (
-                  `✔ Complete Payment of ₹${payableAmount.toLocaleString('en-IN')} (Instant)`
-                )}
-              </Button>
+
+                  <Button
+                    onClick={handleConvertToCod}
+                    disabled={isVerifying}
+                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-black py-2 rounded-xl shadow-md text-xs"
+                  >
+                    {isVerifying ? (
+                      <div className="flex items-center gap-2">
+                        <Spinner size="sm" /> Confirming Order...
+                      </div>
+                    ) : (
+                      `💵 Confirm Order as Cash on Delivery / Pay at Shop`
+                    )}
+                  </Button>
+
+                  <Button
+                    onClick={() => handleProcessPayment(true)}
+                    disabled={isVerifying}
+                    color="light"
+                    className="w-full border border-gray-300 hover:bg-gray-100 text-gray-600 font-semibold py-1 rounded-xl text-[11px]"
+                  >
+                    {isVerifying ? (
+                      <div className="flex items-center gap-2">
+                        <Spinner size="sm" /> Simulating Payment...
+                      </div>
+                    ) : (
+                      `🧪 Test Mode Simulation: Complete Demo Payment (Admin Only)`
+                    )}
+                  </Button>
+                </div>
+              )}
             </div>
 
             <div className="flex items-center justify-center gap-1.5 text-[10px] text-gray-400 pt-1">

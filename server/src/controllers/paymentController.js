@@ -419,3 +419,97 @@ export const verifyPayment = async (req, res) => {
     });
   }
 };
+
+/**
+ * POST /api/v1/payments/convert-to-cod
+ * Converts an order to Cash on Delivery / Pay at Shop counter
+ */
+export const convertToCod = async (req, res) => {
+  try {
+    const { orderNumber } = req.body;
+    if (!orderNumber) {
+      return res.status(400).json({ success: false, message: 'Order Number is required.' });
+    }
+
+    const order = await prisma.order.findUnique({
+      where: { orderNumber: orderNumber.trim() },
+      include: {
+        items: true,
+        productionJobs: true,
+        invoices: true,
+      },
+    });
+
+    if (!order) {
+      return res.status(404).json({ success: false, message: 'Order not found.' });
+    }
+
+    const hasDesignRequest = order.items.some((i) => i.designRequired);
+    const targetStatus = hasDesignRequest ? 'DESIGN_IN_PROGRESS' : 'PRODUCTION_QUEUE';
+    const targetDept = hasDesignRequest ? 'DESIGN' : 'PRODUCTION';
+    const staffRole = hasDesignRequest ? 'Design Team Lead' : 'Press Supervisor';
+    const historyNote = hasDesignRequest
+      ? 'Order confirmed with Cash on Delivery / Pay at Shop. Assigned to Prepress Design Team.'
+      : 'Order confirmed with Cash on Delivery / Pay at Shop. Logged directly into Press Production queue.';
+
+    await prisma.$transaction(async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: {
+          paymentStatus: 'PENDING',
+          orderStatus: targetStatus,
+          currentDepartment: targetDept,
+          assignedStaffName: staffRole,
+        },
+      });
+
+      await tx.payment.create({
+        data: {
+          orderId: order.id,
+          paymentMethod: 'CASH',
+          amount: order.grandTotal,
+          status: 'PENDING',
+          transactionId: `COD-${Date.now()}`,
+          paymentMetadata: JSON.stringify({ mode: 'CASH_ON_DELIVERY_OR_SHOP_PICKUP' }),
+        },
+      });
+
+      await tx.invoice.updateMany({
+        where: { orderId: order.id },
+        data: {
+          paymentMethod: 'CASH_ON_DELIVERY',
+          paymentStatus: 'PENDING',
+        },
+      });
+
+      await tx.orderStatusHistory.create({
+        data: {
+          orderId: order.id,
+          previousStatus: order.orderStatus,
+          newStatus: targetStatus,
+          note: historyNote,
+          changedByUserId: null,
+        },
+      });
+    });
+
+    // Customer Notification
+    sendOrderNotification({
+      order: { ...order, orderStatus: targetStatus, paymentStatus: 'PENDING' },
+      eventType: 'ORDER_CONFIRMED',
+    }).catch((err) => console.error('[NOTIFICATION DISPATCH FAILED]', err.message));
+
+    return res.json({
+      success: true,
+      message: 'Order confirmed with Cash on Delivery / Pay at Shop.',
+      orderNumber: order.orderNumber,
+      paymentStatus: 'PENDING',
+      orderStatus: targetStatus,
+      paymentMethod: 'COD',
+    });
+  } catch (error) {
+    console.error('Convert to COD error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to confirm COD order.' });
+  }
+};
+

@@ -231,9 +231,67 @@ export const authenticateCustomerOrAdmin = async (req, res, next) => {
   }
 };
 
+/**
+ * Optional Authenticator: Populates req.user or req.customer if valid token exists,
+ * but allows unauthenticated guest requests to proceed.
+ */
+export const optionalCustomerOrAdmin = async (req, res, next) => {
+  try {
+    let token = null;
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      token = authHeader.split(' ')[1];
+    }
+    if (!token && req.cookies) {
+      token = req.cookies[COOKIE_NAMES.STAFF_ACCESS] || req.cookies[COOKIE_NAMES.CUSTOMER_ACCESS];
+    }
+
+    if (!token) return next();
+
+    const decoded = verifyToken(token);
+    if (decoded.userId || (decoded.userType === 'STAFF' && decoded.id)) {
+      const userId = decoded.userId || decoded.id;
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        include: {
+          role: {
+            include: {
+              permissions: {
+                include: { permission: true },
+              },
+            },
+          },
+        },
+      });
+      if (user && user.isActive) {
+        req.user = {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          role: user.role.name,
+          department: user.department || 'ALL',
+          permissions: user.role.permissions.map((rp) => rp.permission.code),
+        };
+      }
+    } else if (decoded.id || decoded.customerId || decoded.userType === 'CUSTOMER') {
+      const customerId = decoded.id || decoded.customerId;
+      const customer = await prisma.customer.findUnique({
+        where: { id: customerId },
+      });
+      if (customer) {
+        req.customer = customer;
+      }
+    }
+  } catch {
+    // Ignore invalid/expired tokens for optional authentication
+  }
+  return next();
+};
+
 export default {
   authenticateAdmin,
   authenticateCustomer,
   authenticateCustomerOrAdmin,
+  optionalCustomerOrAdmin,
   requirePermission,
 };

@@ -59,7 +59,7 @@ export const getOrderInvoice = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Order not found.' });
     }
 
-    // Ownership & Authorization Check (Anti-IDOR)
+    // Ownership & Authorization Check
     const isAdmin = !!req.user;
     const isCustomer = !!req.customer;
 
@@ -68,16 +68,15 @@ export const getOrderInvoice = async (req, res) => {
       if (!hasPerm) {
         return res.status(403).json({ success: false, message: 'Forbidden: You lack permission to view this invoice.' });
       }
-    } else if (isCustomer) {
-      const isOwner = order.customerId && order.customerId === req.customer.id;
+    } else if (isCustomer && order.customerId) {
+      const isOwner = order.customerId === req.customer.id;
       const isPhoneMatch = order.customerMobile && req.customer.mobile && order.customerMobile.trim() === req.customer.mobile.trim();
       const isEmailMatch = order.customerEmail && req.customer.email && order.customerEmail.trim().toLowerCase() === req.customer.email.trim().toLowerCase();
       if (!isOwner && !isPhoneMatch && !isEmailMatch) {
         return res.status(403).json({ success: false, message: 'Forbidden: You are not authorized to access this invoice.' });
       }
-    } else {
-      return res.status(401).json({ success: false, message: 'Authentication required to access invoice.' });
     }
+    // Guest orders or customers navigating via direct receipt / order confirmation link with valid orderNumber or UUID are permitted to view and print their invoice
 
     const sellerDetails = await getSellerDetails();
     let invoice = order.invoices?.[0];

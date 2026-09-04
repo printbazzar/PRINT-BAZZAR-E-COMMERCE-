@@ -60,7 +60,7 @@ import {
   deleteCompatibilityRule,
   rollbackPriceVersion,
 } from '../controllers/adminController.js';
-import { authenticateAdmin, requirePermission, authenticateCustomerOrAdmin } from '../middleware/auth.js';
+import { authenticateAdmin, requirePermission, authenticateCustomerOrAdmin, optionalCustomerOrAdmin } from '../middleware/auth.js';
 import { upload } from '../middleware/upload.js';
 import {
   getWorkflowBoard,
@@ -134,6 +134,7 @@ import {
 import {
   createPaymentSession,
   verifyPayment,
+  convertToCod,
 } from '../controllers/paymentController.js';
 import {
   adminLoginLimiter,
@@ -193,11 +194,12 @@ router.post('/artwork/upload-file', upload.single('artwork'), uploadArtworkFile)
 router.delete('/artwork/:id', authenticateCustomerOrAdmin, deleteArtworkFile);
 router.get('/artwork/:id', authenticateCustomerOrAdmin, getArtworkUploadById);
 router.post('/orders/:orderNumber/approve-proof', approveCustomerProof);
-router.get('/orders/:orderId/invoice', authenticateCustomerOrAdmin, getOrderInvoice);
+router.get('/orders/:orderId/invoice', optionalCustomerOrAdmin, getOrderInvoice);
 
 // Payment Gateway Verification (Online Orders)
 router.post('/payments/create-order', createPaymentSession);
 router.post('/payments/verify', verifyPayment);
+router.post('/payments/convert-to-cod', convertToCod);
 
 // Public Design Services Routes
 router.get('/design-services/packages', getDesignPackages);

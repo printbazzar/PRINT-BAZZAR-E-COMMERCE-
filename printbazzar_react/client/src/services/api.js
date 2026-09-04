@@ -206,6 +206,7 @@ export const api = {
   // Payment Gateway Verification (Online Orders & Milestone Payments)
   createPaymentSession: (data) => request('/payments/create-order', { method: 'POST', body: data }),
   verifyPayment: (data) => request('/payments/verify', { method: 'POST', body: data }),
+  convertToCod: (data) => request('/payments/convert-to-cod', { method: 'POST', body: data }),
 
   // Admin Settings & Audit
   getSettings: () => request('/admin/settings'),
