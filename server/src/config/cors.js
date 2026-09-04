@@ -32,6 +32,9 @@ export const isOriginAllowed = (origin) => {
   // Exact match against whitelist
   if (ALLOWED_ORIGINS.includes(origin)) return true;
 
+  // Allow vercel preview and production deployments
+  if (/^https:\/\/.*\.vercel\.app$/.test(origin)) return true;
+
   // In development, allow local network IP addresses (e.g. mobile testing on local Wi-Fi)
   if (process.env.NODE_ENV !== 'production') {
     const isLocalNetwork = /^http:\/\/(192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3})(:\d+)?$/.test(origin);

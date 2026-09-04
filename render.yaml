@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: printbazzar-api
+    env: node
+    region: singapore
+    plan: free
+    rootDir: server
+    buildCommand: npm install && npx prisma generate
+    startCommand: node src/server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        value: postgresql://postgres.uigpizwsjtpecaduampi:OPENSUPABASE@aws-0-ap-south-1.pooler.supabase.com:6543/postgres?pgbouncer=true
+      - key: DIRECT_URL
+        value: postgresql://postgres.uigpizwsjtpecaduampi:OPENSUPABASE@aws-0-ap-south-1.pooler.supabase.com:5432/postgres
+      - key: JWT_SECRET
+        value: printbazzar_super_secure_enterprise_jwt_secret_key_2026
+      - key: ALLOWED_ORIGINS
+        value: https://printbazzar.online,https://www.printbazzar.online
+      - key: CLIENT_URL
+        value: https://printbazzar.online
