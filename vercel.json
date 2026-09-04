@@ -1,7 +1,4 @@
 {
-  "version": 2,
-  "buildCommand": "cd printbazzar_react/client && npm install && npm run build",
-  "outputDirectory": "printbazzar_react/client/dist",
   "rewrites": [
     {
       "source": "/api/(.*)",
