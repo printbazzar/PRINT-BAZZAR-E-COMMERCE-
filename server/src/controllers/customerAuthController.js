@@ -11,6 +11,7 @@ import {
   clearAuthCookies,
   COOKIE_NAMES,
 } from '../config/cookies.js';
+import { toCustomerSafeOrder } from '../utils/projections.js';
 export { authenticateCustomer } from '../middleware/auth.js';
 
 const prisma = new PrismaClient();
@@ -391,7 +392,7 @@ export const getCustomerProfile = async (req, res) => {
           activeOrdersCount: activeOrders.length,
           totalSpend,
         },
-        recentOrders: orders.slice(0, 5),
+        recentOrders: orders.slice(0, 5).map((o) => toCustomerSafeOrder(o, { isOwner: true })),
       },
     });
   } catch (error) {
@@ -420,13 +421,17 @@ export const getCustomerOrders = async (req, res) => {
           },
         },
         statusHistory: { orderBy: { createdAt: 'asc' } },
+        payments: true,
+        shipments: true,
       },
       orderBy: { createdAt: 'desc' },
     });
 
+    const safeOrders = orders.map((o) => toCustomerSafeOrder(o, { isOwner: true }));
+
     return res.json({
       success: true,
-      data: orders,
+      data: safeOrders,
     });
   } catch (error) {
     console.error('Error fetching customer orders:', error);

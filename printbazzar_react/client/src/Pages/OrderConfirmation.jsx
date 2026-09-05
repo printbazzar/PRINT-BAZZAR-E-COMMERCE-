@@ -1,10 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useParams, Link, useLocation } from 'react-router-dom';
 import { Button, Spinner } from 'flowbite-react';
-import { HiCheckCircle, HiOutlinePrinter, HiOutlineTruck, HiArrowRight } from 'react-icons/hi';
+import { HiCheckCircle, HiOutlinePrinter, HiOutlineTruck, HiArrowRight, HiShoppingBag } from 'react-icons/hi';
 import { FaWhatsapp } from 'react-icons/fa';
 import { api } from '../services/api';
 import { useBusinessInfo } from '../context/BusinessInfoContext';
+import { fireCelebrationPopper } from '../utils/confettiPopper';
 
 export default function OrderConfirmation() {
   const { businessInfo, getWhatsAppLink } = useBusinessInfo();
@@ -12,6 +13,7 @@ export default function OrderConfirmation() {
   const location = useLocation();
   const [order, setOrder] = useState(location.state?.order || null);
   const [loading, setLoading] = useState(!order);
+  const hasCelebrated = useRef(false);
 
   useEffect(() => {
     if (!order && orderNumber) {
@@ -26,6 +28,24 @@ export default function OrderConfirmation() {
         .finally(() => setLoading(false));
     }
   }, [orderNumber]);
+
+  // Trigger celebration popper ONLY after backend payment verification confirms order
+  useEffect(() => {
+    if (order && !hasCelebrated.current) {
+      const isConfirmed =
+        order.paymentStatus === 'CONFIRMED' ||
+        order.paymentStatus === 'PAID' ||
+        order.orderStatus === 'CONFIRMED' ||
+        order.orderStatus === 'PRODUCTION_QUEUE';
+
+      if (isConfirmed) {
+        hasCelebrated.current = true;
+        setTimeout(() => {
+          fireCelebrationPopper();
+        }, 150);
+      }
+    }
+  }, [order]);
 
   if (loading) {
     return (
@@ -97,22 +117,37 @@ export default function OrderConfirmation() {
           </div>
         </div>
 
-        {/* Ordered Items List */}
+        {/* Ordered Items List with Confirmed Customer Specifications */}
         <div className="divide-y my-6">
           {order.items?.map((item, idx) => (
-            <div key={idx} className="py-4 flex justify-between items-start">
-              <div>
+            <div key={idx} className="py-4 flex flex-col sm:flex-row justify-between items-start gap-4">
+              <div className="space-y-1.5">
                 <h3 className="font-bold text-gray-900 text-base">{item.name || item.productNameSnapshot}</h3>
-                <p className="text-xs text-gray-500 mt-0.5">
-                  SKU: {item.sku || item.skuSnapshot} | Quantity: <span className="font-semibold text-gray-800">{item.quantity} pieces</span>
+                <p className="text-xs text-gray-500">
+                  Quantity: <span className="font-bold text-gray-900">{item.quantity} pieces</span> | SKU: {item.sku || item.skuSnapshot}
                 </p>
+
+                {/* Confirmed Customer Specifications Badges */}
+                {item.customerSpecifications && item.customerSpecifications.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    {item.customerSpecifications.map((spec, sIdx) => (
+                      <span
+                        key={sIdx}
+                        className="inline-flex items-center text-[11px] bg-gray-100 text-gray-700 px-2 py-0.5 rounded border border-gray-200 font-medium"
+                      >
+                        <strong className="mr-1 text-gray-900">{spec.label}:</strong> {spec.value}
+                      </span>
+                    ))}
+                  </div>
+                )}
+
                 {item.designRequired && (
-                  <span className="inline-block text-[11px] bg-yellow-50 text-yellow-700 font-medium px-2 py-0.5 rounded mt-1">
-                    Design Service Requested
+                  <span className="inline-block text-[11px] bg-purple-50 text-purple-700 font-medium px-2 py-0.5 rounded mt-1 border border-purple-200">
+                    🎨 Design Service: {item.designPackageName || 'Custom Graphic Design'}
                   </span>
                 )}
               </div>
-              <span className="font-bold text-gray-900 text-lg">₹{item.totalPrice || item.totalPriceSnapshot}</span>
+              <span className="font-black text-gray-900 text-lg flex-shrink-0">₹{item.totalPrice || item.totalPriceSnapshot}</span>
             </div>
           ))}
         </div>
@@ -126,7 +161,7 @@ export default function OrderConfirmation() {
           <div className="flex justify-between">
             <span>Delivery:</span>
             <span className="font-semibold text-gray-900">
-              {order.shippingCharge === 0 ? <span className="text-green-600">FREE</span> : `₹${order.shippingCharge}`}
+              {order.shippingCharge === 0 ? <span className="text-green-600 font-bold">FREE</span> : `₹${order.shippingCharge}`}
             </span>
           </div>
           <div className="flex justify-between">
@@ -134,7 +169,7 @@ export default function OrderConfirmation() {
             <span className="font-semibold text-gray-900">₹{order.totalTax}</span>
           </div>
           <div className="flex justify-between text-lg font-bold text-gray-900 pt-3 border-t">
-            <span>Total Paid / Payable:</span>
+            <span>Total Paid:</span>
             <span className="text-2xl font-black text-red-600">₹{order.grandTotal}</span>
           </div>
         </div>
@@ -152,7 +187,7 @@ export default function OrderConfirmation() {
               <div className="bg-amber-50 p-3 rounded-lg border border-amber-200 text-xs text-amber-900">
                 <p className="font-bold">{businessInfo.address?.city || 'Trichy'} Press Facility:</p>
                 <p>{businessInfo.address?.pressFacilityAddress || businessInfo.address?.fullDisplayAddress || 'No. 42, Big Bazzar Street, Singarathope, Tiruchirappalli - 620008'}</p>
-                <p className="text-[11px] text-amber-700 mt-1">Free Store Pickup. We will message you when ready.</p>
+                <p className="text-[11px] text-amber-700 mt-1">Free Store Pickup. We will message you via WhatsApp/SMS when your job is ready.</p>
               </div>
             ) : (
               <p className="text-gray-600 leading-relaxed text-xs">
@@ -164,43 +199,30 @@ export default function OrderConfirmation() {
           </div>
 
           <div>
-            <h4 className="font-bold text-gray-900 mb-2">Customer Contact</h4>
+            <h4 className="font-bold text-gray-900 mb-2">Customer Contact & Confirmation</h4>
             <p className="text-gray-600 text-xs leading-relaxed">
               Name: <span className="font-semibold text-gray-900">{order.customerName}</span> <br />
               Phone: <span className="font-semibold text-gray-900">{order.customerMobile}</span> <br />
               Email: {order.customerEmail || 'N/A'} <br />
-              Payment: <span className="font-semibold text-gray-900">{order.paymentStatus}</span> ({order.paymentMethod || 'UPI'})
+              Payment: <span className="font-semibold text-green-700 font-bold">{order.paymentStatus}</span> ({order.paymentMethod || 'Online'})
             </p>
           </div>
         </div>
 
-        {/* Linked Operations Identifiers */}
-        <div className="mt-6 pt-4 border-t bg-slate-900 text-white p-4 rounded-xl text-xs">
-          <p className="text-[10px] text-yellow-400 font-extrabold uppercase tracking-wider mb-2">Unified Order Tracking Hierarchy</p>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 font-mono">
-            <div className="bg-slate-800 p-2 rounded">
-              <span className="text-[10px] text-gray-400 block font-sans">Order ID:</span>
-              <span className="text-yellow-400 font-bold">{order.orderNumber}</span>
-            </div>
-            {order.productionJobs?.[0] && (
-              <div className="bg-slate-800 p-2 rounded">
-                <span className="text-[10px] text-gray-400 block font-sans">Job Card:</span>
-                <span className="text-blue-400 font-bold">{order.productionJobs[0].jobNumber}</span>
-              </div>
-            )}
-            {order.invoices?.[0] && (
-              <div className="bg-slate-800 p-2 rounded">
-                <span className="text-[10px] text-gray-400 block font-sans">Invoice:</span>
-                <span className="text-green-400 font-bold">{order.invoices[0].invoiceNumber}</span>
-              </div>
-            )}
-            {order.shipments?.[0] && (
-              <div className="bg-slate-800 p-2 rounded">
-                <span className="text-[10px] text-gray-400 block font-sans">Shipment:</span>
-                <span className="text-purple-400 font-bold">{order.shipments[0].shipmentNumber}</span>
-              </div>
-            )}
+        {/* Customer Reassurance Banner */}
+        <div className="mt-6 pt-4 border-t bg-amber-50/70 border border-amber-200 p-4 rounded-xl text-xs text-amber-900 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+          <div>
+            <span className="font-black uppercase tracking-wider text-[10px] text-amber-800 block">Production Schedule</span>
+            <p className="font-medium mt-0.5">Your order is registered in our Trichy press queue. Digital updates will be posted to your live tracking timeline.</p>
           </div>
+          {order.estimatedDeliveryDate && (
+            <div className="text-right flex-shrink-0">
+              <span className="text-[10px] text-amber-700 uppercase font-bold block">Estimated Delivery</span>
+              <span className="font-black text-amber-950 text-sm">
+                {new Date(order.estimatedDeliveryDate).toLocaleDateString('en-IN', { dateStyle: 'medium' })}
+              </span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -225,14 +247,24 @@ export default function OrderConfirmation() {
           </Button>
         </div>
 
-        <Button
-          as={Link}
-          to={`/track-order/${order.orderNumber}`}
-          color="dark"
-          className="bg-black hover:bg-yellow-400 hover:text-black font-bold w-full sm:w-auto justify-center"
-        >
-          <HiOutlineTruck className="w-5 h-5 mr-2" /> Live Order Tracking <HiArrowRight className="w-4 h-4 ml-2" />
-        </Button>
+        <div className="flex flex-wrap gap-3 w-full sm:w-auto">
+          <Button
+            as={Link}
+            to="/shop"
+            color="light"
+            className="flex items-center gap-2 text-gray-700 font-bold w-full sm:w-auto justify-center border-gray-300"
+          >
+            <HiShoppingBag className="w-5 h-5 mr-1 text-gray-500" /> Continue Shopping
+          </Button>
+          <Button
+            as={Link}
+            to={`/track-order/${order.orderNumber}`}
+            color="dark"
+            className="bg-black hover:bg-yellow-400 hover:text-black font-bold w-full sm:w-auto justify-center"
+          >
+            <HiOutlineTruck className="w-5 h-5 mr-2" /> Live Order Tracking <HiArrowRight className="w-4 h-4 ml-2" />
+          </Button>
+        </div>
       </div>
     </div>
   );

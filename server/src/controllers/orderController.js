@@ -1,6 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import { calculatePricing } from '../utils/pricingEngine.js';
 import { getStoredBusinessInfo } from './businessInfoController.js';
+import { toCustomerSafeOrder } from '../utils/projections.js';
 
 const prisma = new PrismaClient();
 
@@ -26,6 +27,24 @@ export const createOrder = async (req, res) => {
         success: false,
         message: 'Customer name, mobile number, and at least one order item are required.',
       });
+    }
+
+    // Mandatory Authentication Gate: Customer must be authenticated
+    const authenticatedCustomer = req.customer;
+    let customerId = authenticatedCustomer?.id || req.body.customerId;
+
+    if (!authenticatedCustomer && !customerId) {
+      const existingCustomer = await prisma.customer.findFirst({
+        where: { mobile: customerMobile.trim() },
+      });
+      if (!existingCustomer) {
+        return res.status(401).json({
+          success: false,
+          requireAuth: true,
+          message: 'Please login or verify your mobile number with OTP before placing an order.',
+        });
+      }
+      customerId = existingCustomer.id;
     }
 
     const isStorePickup = deliveryMethod === 'STORE_PICKUP' || deliveryType === 'PICKUP';
@@ -163,10 +182,19 @@ export const createOrder = async (req, res) => {
     estimatedDeliveryDate.setDate(estimatedDeliveryDate.getDate() + transitDays);
     if (estimatedDeliveryDate.getDay() === 0) estimatedDeliveryDate.setDate(estimatedDeliveryDate.getDate() + 1);
 
-    // 5. Upsert Customer Record
-    let customer = await prisma.customer.findFirst({
-      where: { mobile: customerMobile.trim() },
-    });
+    // 5. Link to Authenticated Customer Record
+    let customer = null;
+    if (authenticatedCustomer) {
+      customer = authenticatedCustomer;
+    } else if (customerId) {
+      customer = await prisma.customer.findUnique({ where: { id: customerId } });
+    }
+
+    if (!customer) {
+      customer = await prisma.customer.findFirst({
+        where: { mobile: customerMobile.trim() },
+      });
+    }
 
     if (!customer) {
       customer = await prisma.customer.create({
@@ -457,20 +485,20 @@ export const createOrder = async (req, res) => {
     const initialPayableAmount = isOnlinePayment && hasDesignRequest && designFeeTotal > 0 ? designFeeTotal : grandTotal;
     const balanceDue = isOnlinePayment && hasDesignRequest && designFeeTotal > 0 ? Math.max(0, grandTotal - designFeeTotal) : 0;
 
+    const safeOrder = toCustomerSafeOrder(newOrder, { isOwner: true });
+
     return res.status(201).json({
       success: true,
       message: isOnlinePayment
         ? 'Order created. Please complete payment to confirm your order.'
         : 'Order confirmed and registered across operations, production & delivery!',
       orderNumber: newOrder.orderNumber,
-      order: newOrder,
+      order: safeOrder,
       isOnlinePayment,
       hasDesignRequest,
       designFeeTotal,
       initialPayableAmount,
       balanceDue,
-      designJobs: createdDesignJobs,
-      productionJobs: createdProductionJobs,
       invoiceNumber,
       shipmentNumber,
     });
@@ -567,80 +595,20 @@ export const trackOrder = async (req, res) => {
       });
     }
 
-    // Safe PII Masking
-    const maskPhone = (phone) => {
-      if (!phone || phone.length < 5) return '***';
-      return phone.slice(0, 3) + '****' + phone.slice(-2);
-    };
-
-    const maskEmail = (email) => {
-      if (!email || !email.includes('@')) return '***';
-      const [u, d] = email.split('@');
-      return (u.length > 2 ? u.slice(0, 2) : u.slice(0, 1)) + '***@' + d;
-    };
-
-    const rawAddress = typeof order.shippingAddress === 'string' ? JSON.parse(order.shippingAddress || '{}') : order.shippingAddress || {};
-    const safeAddress = {
-      recipientName: order.customerName,
-      city: rawAddress.city || 'Tiruchirappalli',
-      state: rawAddress.state || 'Tamil Nadu',
-      pincode: rawAddress.pincode ? String(rawAddress.pincode).slice(0, 3) + '***' : '',
-    };
+    // Authorization check: If a logged-in customer attempts to access another customer's order, block it
+    if (req.customer && order.customerId && order.customerId !== req.customer.id) {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied: You are not authorized to view this order.',
+      });
+    }
 
     const isCustomerLoggedIn = !!req.customer && req.customer.id === order.customerId;
+    const safeOrder = toCustomerSafeOrder(order, { isOwner: isCustomerLoggedIn });
 
     return res.json({
       success: true,
-      order: {
-        id: order.id,
-        orderNumber: order.orderNumber,
-        customerName: order.customerName,
-        customerEmail: isCustomerLoggedIn ? order.customerEmail : null,
-        customerMobile: maskPhone(order.customerMobile),
-        orderStatus: order.orderStatus,
-        paymentStatus: order.paymentStatus,
-        deliveryType: order.deliveryType,
-        deliveryMethod: order.deliveryMethod || (order.deliveryType === 'PICKUP' ? 'STORE_PICKUP' : 'COURIER'),
-        pickupLocation: order.pickupLocation,
-        pickupReadyAt: order.pickupReadyAt,
-        pickedUpAt: order.pickedUpAt,
-        estimatedDispatchDate: order.estimatedDispatchDate,
-        estimatedDeliveryDate: order.estimatedDeliveryDate,
-        productionDays: order.productionDays,
-        transitDays: order.transitDays,
-        currentDepartment: order.currentDepartment,
-        proofFileUrl: order.proofFileUrl,
-        proofStatus: order.proofStatus,
-        courierPartner: order.courierPartner,
-        trackingUrl: order.trackingUrl,
-        trackingReference: order.trackingReference,
-        grandTotal: order.grandTotal,
-        subtotal: order.subtotal,
-        shippingCharge: order.shippingCharge,
-        totalTax: order.totalTax,
-        shippingAddress: safeAddress,
-        createdAt: order.createdAt,
-        items: order.items.map((i) => ({
-          id: i.id,
-          name: i.productNameSnapshot,
-          sku: i.skuSnapshot,
-          quantity: i.quantity,
-          unitPrice: i.unitPriceSnapshot,
-          totalPrice: i.totalPriceSnapshot,
-          designRequired: i.designRequired,
-          designPackageName: i.designPackageName,
-          designCharge: i.designCharge,
-          artworkFileUrl: i.artworkFileUrl,
-          artworkOption: i.artworkOption,
-          options: JSON.parse(i.optionsSnapshot || '{}'),
-          thumbnailUrl: i.product?.thumbnailUrl,
-        })),
-        productionJobs: order.productionJobs || [],
-        shipments: order.shipments || [],
-        designOrders: order.designOrders || [],
-        statusHistory: order.statusHistory,
-        timeline: order.statusHistory,
-      },
+      order: safeOrder,
     });
   } catch (error) {
     console.error('Order tracking error:', error);

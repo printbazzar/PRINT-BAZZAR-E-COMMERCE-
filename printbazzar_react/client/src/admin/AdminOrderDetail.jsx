@@ -527,6 +527,95 @@ export default function AdminOrderDetail() {
                 )}
               </div>
             </div>
+
+            {/* Customer-Confirmed Order Specifications */}
+            <div className="bg-white p-6 rounded-xl border shadow-xs space-y-4">
+              <div className="flex items-center justify-between border-b pb-3">
+                <div className="flex items-center gap-2">
+                  <HiOutlineSparkles className="w-5 h-5 text-amber-500" />
+                  <h4 className="font-bold text-gray-900 text-sm">
+                    Customer-Confirmed Order Specifications
+                  </h4>
+                </div>
+                <span className="text-[11px] font-semibold text-gray-500 bg-gray-100 px-2.5 py-1 rounded-full">
+                  {order.items?.length || 0} Ordered {order.items?.length === 1 ? 'Item' : 'Items'}
+                </span>
+              </div>
+
+              <div className="space-y-4 divide-y divide-gray-100">
+                {order.items?.map((item, idx) => {
+                  const confirmedSpecs = item.customerConfirmedSpecs || [];
+                  return (
+                    <div key={item.id || idx} className="pt-4 first:pt-0 space-y-2.5">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <span className="font-bold text-gray-900 text-sm">{item.productNameSnapshot}</span>
+                          <p className="text-xs text-gray-500 font-mono">SKU: {item.skuSnapshot}</p>
+                        </div>
+                        <div className="text-right">
+                          <span className="font-bold text-gray-900 text-sm">₹{Number(item.totalPriceSnapshot || 0).toLocaleString('en-IN')}</span>
+                          <p className="text-xs text-gray-500">Qty: {item.quantity} units</p>
+                        </div>
+                      </div>
+
+                      {/* Badges of Confirmed Specifications */}
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+                          Quantity: {item.quantity}
+                        </span>
+                        {confirmedSpecs.length > 0 ? (
+                          confirmedSpecs.map((spec, sIdx) => (
+                            <span
+                              key={sIdx}
+                              className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium bg-gray-50 text-gray-800 border border-gray-200"
+                            >
+                              <strong className="mr-1 text-gray-900">{spec.label}:</strong> {spec.value}
+                            </span>
+                          ))
+                        ) : (
+                          // Fallback parsing from optionsSnapshot
+                          (() => {
+                            let parsed = {};
+                            try {
+                              parsed = JSON.parse(item.optionsSnapshot || '{}');
+                            } catch {
+                              parsed = {};
+                            }
+                            return Object.entries(parsed)
+                              .filter(([k, v]) => !k.startsWith('_') && !['no', 'none', 'false', 'n/a'].includes(String(v).toLowerCase()))
+                              .map(([k, v], sIdx) => (
+                                <span
+                                  key={sIdx}
+                                  className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium bg-gray-50 text-gray-800 border border-gray-200"
+                                >
+                                  <strong className="mr-1 text-gray-900">{k}:</strong> {String(v)}
+                                </span>
+                              ));
+                          })()
+                        )}
+                      </div>
+
+                      {/* Artwork & File Information */}
+                      {item.artworkFileUrl && (
+                        <div className="flex items-center gap-2 pt-1">
+                          <span className="text-xs text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded font-medium border border-emerald-200">
+                            Print-Ready File Attached
+                          </span>
+                          <a
+                            href={item.artworkFileUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-xs text-blue-600 hover:underline flex items-center gap-1 font-medium"
+                          >
+                            <HiOutlineDownload className="w-3.5 h-3.5" /> Download Customer File
+                          </a>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           </div>
 
           {/* Right Column: Internal Notes */}

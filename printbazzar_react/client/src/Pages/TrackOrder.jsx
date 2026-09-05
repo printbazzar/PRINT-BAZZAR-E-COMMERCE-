@@ -441,7 +441,7 @@ export default function TrackOrder() {
                     <p className="text-xs font-bold text-gray-900">
                       {hist.newStatus?.replace(/_/g, ' ')}
                     </p>
-                    <p className="text-xs text-gray-600 mt-0.5">{hist.customerNote || hist.note}</p>
+                    <p className="text-xs text-gray-600 mt-0.5">{hist.customerNote || 'Your order status has been updated in our system.'}</p>
                     <span className="text-[10px] text-gray-400 mt-0.5 block">
                       {new Date(hist.createdAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}
                     </span>
@@ -458,12 +458,24 @@ export default function TrackOrder() {
             </h3>
             <div className="divide-y text-xs">
               {order.items?.map((item) => (
-                <div key={item.id} className="py-3 flex justify-between items-center">
-                  <div>
-                    <h4 className="font-bold text-gray-900">{item.productNameSnapshot || item.name}</h4>
+                <div key={item.id} className="py-3 flex justify-between items-start">
+                  <div className="space-y-1">
+                    <h4 className="font-bold text-gray-900 text-sm">{item.productNameSnapshot || item.name}</h4>
                     <p className="text-gray-500 text-[11px]">
                       Quantity: <strong className="text-gray-800">{item.quantity} pieces</strong> | SKU: {item.skuSnapshot || item.sku}
                     </p>
+                    {item.customerSpecifications && item.customerSpecifications.length > 0 && (
+                      <div className="flex flex-wrap gap-1 pt-1">
+                        {item.customerSpecifications.map((spec, sIdx) => (
+                          <span
+                            key={sIdx}
+                            className="inline-flex items-center text-[10px] bg-gray-100 text-gray-700 px-1.5 py-0.5 rounded border border-gray-200"
+                          >
+                            <strong className="mr-1 text-gray-900">{spec.label}:</strong> {spec.value}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
                   <span className="font-bold text-gray-900 text-sm">₹{item.totalPriceSnapshot || item.totalPrice}</span>
                 </div>

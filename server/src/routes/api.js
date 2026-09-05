@@ -190,9 +190,9 @@ router.post('/pricing/calculate', calculatePriceEndpoint);
 router.get('/banners', getBanners);
 router.get('/reviews', getReviews);
 
-// Orders & Checkout (Public)
-router.post('/orders', orderCreationLimiter, validateOrderCreation, createOrder);
-router.get('/orders/track/:orderIdentifier', trackOrder);
+// Orders & Checkout (Customer Authenticated & Protected)
+router.post('/orders', orderCreationLimiter, optionalCustomerOrAdmin, validateOrderCreation, createOrder);
+router.get('/orders/track/:orderIdentifier', optionalCustomerOrAdmin, trackOrder);
 router.post('/orders/upload-artwork', upload.single('artwork'), uploadArtwork);
 router.post('/artwork/upload', upload.single('file'), uploadArtworkFile);
 router.post('/artwork/upload-file', upload.single('artwork'), uploadArtworkFile);

@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { calculatePricing } from '../utils/pricingEngine.js';
+import { toCustomerSafeProduct } from '../utils/projections.js';
 
 const prisma = new PrismaClient();
 
@@ -156,9 +157,11 @@ export const getProducts = async (req, res) => {
       prisma.product.count({ where }),
     ]);
 
+    const safeProducts = products.map(toCustomerSafeProduct);
+
     return res.json({
       success: true,
-      data: products,
+      data: safeProducts,
       pagination: {
         total: totalCount,
         page: parseInt(page, 10),
@@ -381,14 +384,25 @@ export const getProductBySlug = async (req, res) => {
       include: { images: { orderBy: { displayOrder: 'asc' } } },
     });
 
+    const safeProduct = toCustomerSafeProduct(product);
+    const safeRelatedProducts = (relatedProducts || []).map((rp) => ({
+      id: rp.id,
+      name: rp.name,
+      slug: rp.slug,
+      sku: rp.sku,
+      startingPrice: rp.startingPrice,
+      thumbnailUrl: rp.thumbnailUrl,
+      images: (rp.images || []).map((img) => ({ id: img.id, url: img.url, isPrimary: img.isPrimary })),
+    }));
+
     return res.json({
       success: true,
       data: {
-        ...product,
+        ...safeProduct,
         artworkSetting,
         designPackages,
         designBriefFields,
-        relatedProducts,
+        relatedProducts: safeRelatedProducts,
       },
     });
   } catch (error) {

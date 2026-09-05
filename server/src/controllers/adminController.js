@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client';
+import { toAdminOrderDetailsProjection } from '../utils/projections.js';
 
 const prisma = new PrismaClient();
 
@@ -960,7 +961,9 @@ export const getAdminOrderById = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Order not found.' });
     }
 
-    return res.json({ success: true, data: order });
+    const adminOrder = toAdminOrderDetailsProjection(order);
+
+    return res.json({ success: true, data: adminOrder });
   } catch (error) {
     return res.status(500).json({ success: false, message: 'Failed to fetch order details.' });
   }
@@ -969,7 +972,7 @@ export const getAdminOrderById = async (req, res) => {
 export const updateOrderStatus = async (req, res) => {
   try {
     const { id } = req.params;
-    const { status, note, trackingReference, estimatedDeliveryDate, paymentStatus } = req.body;
+    const { status, note, customerNote, trackingReference, estimatedDeliveryDate, paymentStatus } = req.body;
 
     const order = await prisma.order.findUnique({ where: { id } });
     if (!order) return res.status(404).json({ success: false, message: 'Order not found' });
@@ -990,6 +993,7 @@ export const updateOrderStatus = async (req, res) => {
                 newStatus: status,
                 changedByUserId: req.user?.id || null,
                 note: note || `Order status updated to ${status} by admin.`,
+                customerNote: customerNote || null,
               },
             }
           : undefined,

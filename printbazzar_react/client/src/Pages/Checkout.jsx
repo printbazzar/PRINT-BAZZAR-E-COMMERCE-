@@ -206,16 +206,26 @@ export default function Checkout() {
     }
   };
 
-  // Step 1: Validate and open Final Order Review Modal
+  // Step 1: Validate and open Final Order Review Modal (Enforcing Authentication Gate)
   const handleSubmitOrder = (e) => {
     if (e && e.preventDefault) e.preventDefault();
     if (!validateForm()) return;
+    if (!customer) {
+      setSubmitError('Please verify your mobile number with OTP to continue to payment.');
+      handleOpenOtpModal();
+      return;
+    }
     setReviewModalOpen(true);
   };
 
   // Step 2: Customer confirmed review -> Execute Order Placement
   const executeOrderPlacement = async () => {
     if (isSubmitting) return;
+    if (!customer) {
+      setSubmitError('Please verify your mobile number with OTP to continue.');
+      handleOpenOtpModal();
+      return;
+    }
     setIsSubmitting(true);
     setSubmitError('');
     setReviewModalOpen(false);
@@ -340,32 +350,35 @@ export default function Checkout() {
             <div className="flex flex-wrap justify-between items-center gap-2 mb-4">
               <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
                 <span className="w-6 h-6 bg-yellow-400 text-black text-xs font-extrabold rounded-full flex items-center justify-center">1</span>
-                Contact Information
+                Contact & Account Verification
               </h2>
               {customer ? (
                 <span className="text-xs bg-green-100 text-green-800 font-bold px-2.5 py-1 rounded-full flex items-center gap-1">
-                  <HiCheckCircle className="w-4 h-4 text-green-600" /> Account Verified
+                  <HiCheckCircle className="w-4 h-4 text-green-600" /> Account Verified ({customer.mobile})
                 </span>
               ) : (
                 <button
                   type="button"
                   onClick={handleOpenOtpModal}
-                  className="text-xs font-bold text-yellow-950 bg-yellow-300 hover:bg-yellow-400 px-3 py-1 rounded-lg transition shadow-2xs flex items-center gap-1"
+                  className="text-xs font-bold text-yellow-950 bg-yellow-300 hover:bg-yellow-400 px-3.5 py-1.5 rounded-lg transition shadow-2xs flex items-center gap-1.5"
                 >
-                  ⚡ Quick OTP Login
+                  ⚡ Verify Mobile via OTP (Required)
                 </button>
               )}
             </div>
 
             {!customer && (
-              <div className="mb-4 p-2.5 bg-blue-50/80 border border-blue-200 rounded-xl text-xs text-blue-900 flex items-center justify-between">
-                <span>Have an account? Login via Mobile OTP to auto-fill your saved address and sync tracking.</span>
+              <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+                <div>
+                  <strong className="block text-amber-950 font-bold">🔒 Customer Authentication Gate</strong>
+                  <span>Please verify your mobile number with a quick 6-digit OTP before proceeding to payment. Your selected specifications and artwork files will be 100% preserved.</span>
+                </div>
                 <button
                   type="button"
                   onClick={handleOpenOtpModal}
-                  className="underline font-bold text-blue-700 hover:text-blue-950 ml-2 whitespace-nowrap"
+                  className="bg-amber-800 hover:bg-amber-900 text-white font-extrabold px-3 py-1.5 rounded-lg text-xs whitespace-nowrap shadow-xs"
                 >
-                  Sign In ➔
+                  Verify Now ➔
                 </button>
               </div>
             )}
@@ -905,12 +918,27 @@ export default function Checkout() {
                     <p className="text-gray-500 text-[11px]">
                       Qty: <strong>{item.quantity} {item.quantityUnit || 'pcs'}</strong>
                     </p>
+
+                    {/* Customer-Confirmed Options */}
+                    {item.selectedOptions && (
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {Object.entries(item.selectedOptions).map(([k, v]) => {
+                          if (k.startsWith('_') || String(v).toLowerCase() === 'no' || String(v).toLowerCase() === 'none') return null;
+                          return (
+                            <span key={k} className="inline-block text-[10px] bg-white border border-gray-200 px-1.5 py-0.5 rounded text-gray-700 font-medium">
+                              <strong className="text-gray-900">{k}:</strong> {String(v)}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    )}
+
                     {item.artworkOption === 'DESIGN_SUPPORT' ? (
-                      <span className="text-[10px] font-bold text-purple-700 bg-purple-50 px-1.5 py-0.5 rounded border border-purple-200 inline-block mt-0.5">
+                      <span className="text-[10px] font-bold text-purple-700 bg-purple-50 px-1.5 py-0.5 rounded border border-purple-200 inline-block mt-1">
                         🎨 Design Support: {item.designPackageName || 'Custom'} (+₹{item.designFee || 0})
                       </span>
                     ) : item.artworkFileName ? (
-                      <div className="flex items-center gap-1.5 mt-0.5">
+                      <div className="flex items-center gap-1.5 mt-1">
                         <span className="text-[10px] text-green-700 font-semibold truncate max-w-[200px]">
                           📎 {item.artworkFileName}
                         </span>

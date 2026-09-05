@@ -333,6 +333,9 @@ export const verifyPayment = async (req, res) => {
           previousStatus: order.orderStatus,
           newStatus: targetOrderStatus,
           note: historyNote,
+          customerNote: isStage1
+            ? 'Design service fee confirmed. Our design team has started working on your custom artwork.'
+            : 'Payment confirmed successfully! Your order has been scheduled for printing.',
           changedByUserId: null,
         },
       });
@@ -507,6 +510,7 @@ export const convertToCod = async (req, res) => {
           previousStatus: order.orderStatus,
           newStatus: targetStatus,
           note: historyNote,
+          customerNote: 'Order confirmed with Cash on Delivery. We are processing your print job.',
           changedByUserId: null,
         },
       });
