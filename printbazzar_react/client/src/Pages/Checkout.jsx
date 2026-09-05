@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Button, TextInput, Label, Select, Checkbox, Spinner, Alert } from 'flowbite-react';
-import { HiHome, HiLockClosed, HiCheckCircle, HiOutlineSparkles } from 'react-icons/hi';
+import { Button, TextInput, Label, Select, Checkbox, Spinner, Alert, Modal } from 'flowbite-react';
+import { HiHome, HiLockClosed, HiCheckCircle, HiOutlineSparkles, HiOutlineTruck, HiOutlineDocumentText, HiOutlineRefresh } from 'react-icons/hi';
 import { HiOutlineBuildingOffice2 } from 'react-icons/hi2';
 import { useCart } from '../context/CartContext';
 import { useCustomerAuth } from '../context/CustomerAuthContext';
@@ -12,12 +12,24 @@ import { useBusinessInfo } from '../context/BusinessInfoContext';
 export default function Checkout() {
   const { businessInfo } = useBusinessInfo();
   const { cartItems, cartSubtotal, cartShipping, cartGrandTotal, clearCart } = useCart();
-  const { customer, isCorporate } = useCustomerAuth();
+  const { customer, isCorporate, sendOtp, verifyOtp } = useCustomerAuth();
   const navigate = useNavigate();
 
   const [storeSettings, setStoreSettings] = useState(null);
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const [activePaymentOrder, setActivePaymentOrder] = useState(null);
+
+  // Quick OTP Authentication State
+  const [otpModalOpen, setOtpModalOpen] = useState(false);
+  const [otpMobile, setOtpMobile] = useState('');
+  const [otpCode, setOtpCode] = useState('');
+  const [otpSent, setOtpSent] = useState(false);
+  const [otpLoading, setOtpLoading] = useState(false);
+  const [otpError, setOtpError] = useState('');
+  const [otpTimer, setOtpTimer] = useState(0);
+
+  // Mandatory Final Order Review Modal State
+  const [reviewModalOpen, setReviewModalOpen] = useState(false);
 
   const [formData, setFormData] = useState({
     customerName: customer?.name || '',
@@ -121,12 +133,92 @@ export default function Checkout() {
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSubmitOrder = async (e) => {
-    e.preventDefault();
-    if (!validateForm()) return;
+  // OTP Timer Countdown
+  useEffect(() => {
+    let interval;
+    if (otpTimer > 0) {
+      interval = setInterval(() => setOtpTimer((t) => t - 1), 1000);
+    }
+    return () => clearInterval(interval);
+  }, [otpTimer]);
 
+  const handleOpenOtpModal = () => {
+    setOtpMobile(formData.customerMobile || '');
+    setOtpCode('');
+    setOtpError('');
+    setOtpSent(false);
+    setOtpModalOpen(true);
+  };
+
+  const handleSendOtp = async () => {
+    if (!otpMobile.trim() || otpMobile.trim().length < 10) {
+      setOtpError('Please enter a valid 10-digit mobile number.');
+      return;
+    }
+    setOtpLoading(true);
+    setOtpError('');
+    try {
+      const res = await sendOtp(otpMobile.trim());
+      if (res.success) {
+        setOtpSent(true);
+        setOtpTimer(60);
+      } else {
+        setOtpError(res.message || 'Failed to send OTP code.');
+      }
+    } catch (err) {
+      setOtpError(err.message || 'Error sending OTP. Please try again.');
+    } finally {
+      setOtpLoading(false);
+    }
+  };
+
+  const handleVerifyOtp = async () => {
+    if (!otpCode.trim() || otpCode.trim().length < 6) {
+      setOtpError('Please enter the 6-digit OTP code.');
+      return;
+    }
+    setOtpLoading(true);
+    setOtpError('');
+    try {
+      const res = await verifyOtp(otpMobile.trim(), otpCode.trim(), formData.customerName);
+      if (res.success) {
+        setOtpModalOpen(false);
+        if (res.customer) {
+          setFormData((prev) => ({
+            ...prev,
+            customerName: res.customer.name || prev.customerName,
+            customerMobile: res.customer.mobile || prev.customerMobile,
+            customerWhatsapp: res.customer.whatsapp || res.customer.mobile || prev.customerWhatsapp,
+            customerEmail: res.customer.email || prev.customerEmail,
+            street: res.customer.address || prev.street,
+            city: res.customer.city || prev.city,
+            pincode: res.customer.pincode || prev.pincode,
+            gstNumber: res.customer.gstNumber || prev.gstNumber,
+          }));
+        }
+      } else {
+        setOtpError(res.message || 'Invalid or expired OTP code.');
+      }
+    } catch (err) {
+      setOtpError(err.message || 'OTP verification failed.');
+    } finally {
+      setOtpLoading(false);
+    }
+  };
+
+  // Step 1: Validate and open Final Order Review Modal
+  const handleSubmitOrder = (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    if (!validateForm()) return;
+    setReviewModalOpen(true);
+  };
+
+  // Step 2: Customer confirmed review -> Execute Order Placement
+  const executeOrderPlacement = async () => {
+    if (isSubmitting) return;
     setIsSubmitting(true);
     setSubmitError('');
+    setReviewModalOpen(false);
 
     try {
       const isPickup = formData.deliveryMethod === 'STORE_PICKUP';
@@ -179,6 +271,9 @@ export default function Checkout() {
           termsAccepted: Boolean(item.termsAccepted),
           termsAcceptedAt: item.termsAcceptedAt || null,
           artworkFileUrl: item.artworkFileUrl || null,
+          artworkFileName: item.artworkFileName || null,
+          artworkVersion: item.artworkVersion || 'V1',
+          artworkAcknowledged: Boolean(item.artworkAcknowledged),
           preflightReport: item.preflightReport || null,
         })),
       };
@@ -242,10 +337,38 @@ export default function Checkout() {
         <div className="lg:col-span-7 space-y-6">
           {/* Contact Details Card */}
           <div className="bg-white border rounded-xl p-6 shadow-sm">
-            <h2 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
-              <span className="w-6 h-6 bg-yellow-400 text-black text-xs font-extrabold rounded-full flex items-center justify-center">1</span>
-              Contact Information
-            </h2>
+            <div className="flex flex-wrap justify-between items-center gap-2 mb-4">
+              <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                <span className="w-6 h-6 bg-yellow-400 text-black text-xs font-extrabold rounded-full flex items-center justify-center">1</span>
+                Contact Information
+              </h2>
+              {customer ? (
+                <span className="text-xs bg-green-100 text-green-800 font-bold px-2.5 py-1 rounded-full flex items-center gap-1">
+                  <HiCheckCircle className="w-4 h-4 text-green-600" /> Account Verified
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleOpenOtpModal}
+                  className="text-xs font-bold text-yellow-950 bg-yellow-300 hover:bg-yellow-400 px-3 py-1 rounded-lg transition shadow-2xs flex items-center gap-1"
+                >
+                  ⚡ Quick OTP Login
+                </button>
+              )}
+            </div>
+
+            {!customer && (
+              <div className="mb-4 p-2.5 bg-blue-50/80 border border-blue-200 rounded-xl text-xs text-blue-900 flex items-center justify-between">
+                <span>Have an account? Login via Mobile OTP to auto-fill your saved address and sync tracking.</span>
+                <button
+                  type="button"
+                  onClick={handleOpenOtpModal}
+                  className="underline font-bold text-blue-700 hover:text-blue-950 ml-2 whitespace-nowrap"
+                >
+                  Sign In ➔
+                </button>
+              </div>
+            )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <Label value="Full Name *" />
@@ -527,9 +650,19 @@ export default function Checkout() {
                   )}
                 </span>
               </div>
-              <div className="flex justify-between">
-                <span>GST (18% included):</span>
-                <span className="font-semibold text-gray-900">₹{Math.round((cartSubtotal * 18) / 100)}</span>
+              <div className="space-y-1 bg-gray-50 p-3 rounded-xl border border-gray-200 text-xs">
+                <div className="flex justify-between text-gray-800 font-bold">
+                  <span>Applicable GST (18% included):</span>
+                  <span className="text-gray-900">₹{Math.round((cartSubtotal * 18) / 100)}</span>
+                </div>
+                <div className="flex justify-between text-gray-500 pl-2">
+                  <span>• Central GST (CGST 9%):</span>
+                  <span>₹{Math.round((cartSubtotal * 9) / 100)}</span>
+                </div>
+                <div className="flex justify-between text-gray-500 pl-2">
+                  <span>• State GST (SGST 9%):</span>
+                  <span>₹{Math.round((cartSubtotal * 9) / 100)}</span>
+                </div>
               </div>
               <div className="flex justify-between text-lg font-bold text-gray-900 pt-3 border-t">
                 <span>Grand Total:</span>
@@ -644,6 +777,218 @@ export default function Checkout() {
           }}
         />
       )}
+
+      {/* Quick Mobile OTP Login Modal */}
+      <Modal show={otpModalOpen} onClose={() => setOtpModalOpen(false)} size="md">
+        <Modal.Header>
+          <div className="flex items-center gap-2">
+            <span className="text-xl">⚡</span>
+            <span className="font-extrabold text-base text-gray-900">Quick Mobile OTP Login</span>
+          </div>
+        </Modal.Header>
+        <Modal.Body>
+          <div className="space-y-4 text-xs">
+            <p className="text-gray-600">
+              Sign in with your 10-digit mobile number to access your saved delivery addresses and bind this order directly to your account.
+            </p>
+
+            {otpError && (
+              <div className="p-2.5 bg-red-50 border border-red-200 text-red-700 rounded-lg font-semibold">
+                ⚠ {otpError}
+              </div>
+            )}
+
+            <div>
+              <Label value="Mobile Number (10 digits)" className="mb-1 block font-bold" />
+              <div className="flex gap-2">
+                <TextInput
+                  type="tel"
+                  maxLength={10}
+                  value={otpMobile}
+                  onChange={(e) => setOtpMobile(e.target.value.replace(/\D/g, ''))}
+                  placeholder="Enter 10-digit mobile number"
+                  className="flex-1 min-h-[42px]"
+                  disabled={otpSent && otpTimer > 0}
+                />
+                <Button
+                  color="dark"
+                  onClick={handleSendOtp}
+                  disabled={otpLoading || (otpSent && otpTimer > 0) || otpMobile.length < 10}
+                  className="bg-black hover:bg-gray-800 text-white font-bold whitespace-nowrap text-xs"
+                >
+                  {otpLoading ? <Spinner size="xs" /> : otpSent ? (otpTimer > 0 ? `Resend (${otpTimer}s)` : 'Resend') : 'Send OTP'}
+                </Button>
+              </div>
+            </div>
+
+            {otpSent && (
+              <div className="pt-3 border-t space-y-3">
+                <div className="p-2 bg-green-50 border border-green-200 text-green-800 rounded-lg text-xs">
+                  ✔ 6-digit OTP code sent to <strong>+91 {otpMobile}</strong>.
+                </div>
+                <div>
+                  <Label value="Enter 6-Digit OTP Code" className="mb-1 block font-bold" />
+                  <TextInput
+                    type="tel"
+                    maxLength={6}
+                    value={otpCode}
+                    onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ''))}
+                    placeholder="e.g. 123456"
+                    className="text-center font-mono font-bold tracking-widest text-lg min-h-[44px]"
+                  />
+                </div>
+                <Button
+                  onClick={handleVerifyOtp}
+                  disabled={otpLoading || otpCode.length < 6}
+                  className="w-full bg-yellow-400 hover:bg-yellow-500 text-black font-extrabold py-2 text-sm rounded-xl shadow"
+                >
+                  {otpLoading ? <Spinner size="sm" /> : 'Verify & Continue Checkout ➔'}
+                </Button>
+              </div>
+            )}
+          </div>
+        </Modal.Body>
+      </Modal>
+
+      {/* Mandatory Final Order Review Modal */}
+      <Modal show={reviewModalOpen} onClose={() => setReviewModalOpen(false)} size="2xl">
+        <Modal.Header>
+          <div className="flex items-center gap-2">
+            <HiOutlineDocumentText className="w-5 h-5 text-yellow-500" />
+            <span className="font-extrabold text-base sm:text-lg text-gray-900">
+              Confirm Print Order Details
+            </span>
+          </div>
+        </Modal.Header>
+        <Modal.Body>
+          <div className="space-y-4 text-xs">
+            {/* Customer & Fulfillment Summary */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3.5 bg-gray-50 rounded-xl border border-gray-200">
+              <div>
+                <span className="text-[10px] uppercase font-bold text-gray-400 block">Customer Information</span>
+                <p className="font-bold text-gray-900 text-sm mt-0.5">{formData.customerName}</p>
+                <p className="text-gray-600">📱 +91 {formData.customerMobile}</p>
+                <p className="text-gray-600 truncate">✉ {formData.customerEmail}</p>
+                {formData.gstNumber && (
+                  <p className="text-purple-700 font-bold mt-1">GSTIN: {formData.gstNumber}</p>
+                )}
+              </div>
+
+              <div>
+                <span className="text-[10px] uppercase font-bold text-gray-400 block">Delivery Method & Destination</span>
+                <span className={`inline-block text-xs font-bold px-2 py-0.5 rounded mt-1 ${
+                  formData.deliveryMethod === 'STORE_PICKUP' ? 'bg-amber-100 text-amber-900' : 'bg-blue-100 text-blue-900'
+                }`}>
+                  {formData.deliveryMethod === 'STORE_PICKUP' ? '🏪 Direct Store Self-Pickup' : '🚚 Doorstep Courier'}
+                </span>
+                {formData.deliveryMethod === 'STORE_PICKUP' ? (
+                  <p className="text-gray-600 mt-1 leading-snug">
+                    Print Bazzar Press Facility, Singarathope, Trichy - 620008. Free Pickup.
+                  </p>
+                ) : (
+                  <p className="text-gray-600 mt-1 leading-snug">
+                    {formData.street}, {formData.city}, {formData.state} - {formData.pincode}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* Items & Artwork Summary */}
+            <div className="border rounded-xl p-3 divide-y max-h-52 overflow-y-auto">
+              <span className="text-[10px] uppercase font-bold text-gray-400 block pb-1.5">
+                Ordered Products ({cartItems.length})
+              </span>
+              {cartItems.map((item, idx) => (
+                <div key={idx} className="py-2.5 flex justify-between items-start gap-2">
+                  <div>
+                    <h5 className="font-bold text-gray-900 text-xs">{item.product?.name}</h5>
+                    <p className="text-gray-500 text-[11px]">
+                      Qty: <strong>{item.quantity} {item.quantityUnit || 'pcs'}</strong>
+                    </p>
+                    {item.artworkOption === 'DESIGN_SUPPORT' ? (
+                      <span className="text-[10px] font-bold text-purple-700 bg-purple-50 px-1.5 py-0.5 rounded border border-purple-200 inline-block mt-0.5">
+                        🎨 Design Support: {item.designPackageName || 'Custom'} (+₹{item.designFee || 0})
+                      </span>
+                    ) : item.artworkFileName ? (
+                      <div className="flex items-center gap-1.5 mt-0.5">
+                        <span className="text-[10px] text-green-700 font-semibold truncate max-w-[200px]">
+                          📎 {item.artworkFileName}
+                        </span>
+                        {item.artworkVersion && (
+                          <span className="text-[9px] font-mono font-bold bg-gray-100 px-1 py-0.2 rounded border">
+                            {item.artworkVersion}
+                          </span>
+                        )}
+                        {item.preflightReport?.status === 'PASS' ? (
+                          <span className="text-[9px] text-green-700 font-bold bg-green-50 px-1.5 py-0.2 rounded-full border border-green-200">
+                            ✔ Preflight Pass
+                          </span>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+                  <span className="font-bold text-gray-900 text-sm whitespace-nowrap">₹{item.totalPrice}</span>
+                </div>
+              ))}
+            </div>
+
+            {/* Financial Breakdown */}
+            <div className="p-3 bg-gray-50 rounded-xl border space-y-1.5 text-xs">
+              <div className="flex justify-between text-gray-600">
+                <span>Taxable Items Subtotal:</span>
+                <span className="font-bold text-gray-900">₹{cartSubtotal}</span>
+              </div>
+              <div className="flex justify-between text-gray-600">
+                <span>Delivery:</span>
+                <span className="font-bold text-gray-900">
+                  {effectiveShipping === 0 ? <span className="text-green-600">FREE</span> : `₹${effectiveShipping}`}
+                </span>
+              </div>
+              <div className="flex justify-between text-gray-600">
+                <span>GST (18% included):</span>
+                <span className="font-bold text-gray-900">₹{Math.round((cartSubtotal * 18) / 100)}</span>
+              </div>
+              <div className="flex justify-between text-sm font-black text-gray-900 pt-2 border-t">
+                <span>Total Amount:</span>
+                <span className="text-red-600 text-base font-black">₹{effectiveGrandTotal}</span>
+              </div>
+              {isDesignSplitActive && (
+                <div className="p-2 bg-purple-50 rounded-lg border border-purple-200 text-purple-900 mt-2 text-[11px]">
+                  <strong>Two-Stage Milestone:</strong> Pay design fee ₹{initialPayableNow} now. Balance ₹{balanceDueLater} is paid upon your approval of the digital proof.
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center gap-3 pt-2">
+              <Button
+                color="light"
+                onClick={() => setReviewModalOpen(false)}
+                className="flex-1 font-bold text-xs"
+              >
+                ← Back to Edit
+              </Button>
+              <Button
+                color="dark"
+                onClick={executeOrderPlacement}
+                disabled={isSubmitting}
+                className="flex-1 bg-yellow-400 hover:bg-yellow-500 text-black font-black text-xs py-2 rounded-xl shadow"
+              >
+                {isSubmitting ? (
+                  <div className="flex items-center gap-1.5">
+                    <Spinner size="xs" /> Processing...
+                  </div>
+                ) : formData.paymentMethod === 'CASH' ? (
+                  `Confirm COD Order (₹${effectiveGrandTotal}) ➔`
+                ) : isDesignSplitActive ? (
+                  `Confirm & Pay ₹${initialPayableNow} ➔`
+                ) : (
+                  `Confirm & Pay ₹${effectiveGrandTotal} ➔`
+                )}
+              </Button>
+            </div>
+          </div>
+        </Modal.Body>
+      </Modal>
     </div>
   );
 }

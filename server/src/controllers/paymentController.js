@@ -235,6 +235,25 @@ export const verifyPayment = async (req, res) => {
     const effectiveTxnRef =
       paymentId || transactionReference || `PAY-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
 
+    // Idempotency Check: Guard against duplicate payments, repeated clicks, and duplicate webhooks
+    const existingPayment = order.payments?.find(
+      (p) => (paymentId && p.transactionId === paymentId) || p.status === 'SUCCESS'
+    );
+
+    if (order.paymentStatus === 'CONFIRMED' || (existingPayment && existingPayment.status === 'SUCCESS' && paymentStage === 'FULL')) {
+      return res.json({
+        success: true,
+        isDuplicateCall: true,
+        message: 'Payment has already been verified and confirmed for this order.',
+        orderNumber: order.orderNumber,
+        paymentStatus: order.paymentStatus,
+        orderStatus: order.orderStatus,
+        amountPaid: order.grandTotal,
+        balanceDue: 0,
+        transactionReference: existingPayment?.transactionId || effectiveTxnRef,
+      });
+    }
+
     // Determine whether this is Stage 1 (Design Service) or Stage 2 / Full Printing
     const isStage1 =
       (hasDesign && config.designSplit && order.paymentStatus === 'PENDING') ||
@@ -512,4 +531,128 @@ export const convertToCod = async (req, res) => {
     return res.status(500).json({ success: false, message: 'Failed to confirm COD order.' });
   }
 };
+
+/**
+ * POST /api/v1/payments/webhook
+ * Razorpay / Payment Gateway Webhook Listener
+ * Asynchronously verifies payment events even if customer closes browser early
+ */
+export const handlePaymentWebhook = async (req, res) => {
+  try {
+    const signature = req.headers['x-razorpay-signature'];
+    const config = await getGatewayConfig();
+
+    if (config.keySecret && signature) {
+      const shasum = crypto.createHmac('sha256', config.keySecret);
+      shasum.update(typeof req.body === 'string' ? req.body : JSON.stringify(req.body));
+      const digest = shasum.digest('hex');
+      if (digest !== signature) {
+        console.warn('[WEBHOOK SECURITY] Invalid webhook signature detected');
+        return res.status(400).json({ success: false, message: 'Invalid webhook signature' });
+      }
+    }
+
+    const event = req.body?.event;
+    const payload = req.body?.payload;
+
+    if (event === 'payment.captured' || event === 'order.paid') {
+      const paymentEntity = payload?.payment?.entity || {};
+      const orderEntity = payload?.order?.entity || {};
+      const orderNumber = paymentEntity.notes?.orderNumber || orderEntity.notes?.orderNumber;
+
+      if (orderNumber) {
+        const order = await prisma.order.findUnique({
+          where: { orderNumber: orderNumber.trim() },
+          include: { items: true, productionJobs: true, payments: true },
+        });
+
+        if (order && order.paymentStatus !== 'CONFIRMED') {
+          const paymentId = paymentEntity.id || `webhook_${Date.now()}`;
+          const amountPaid = paymentEntity.amount ? paymentEntity.amount / 100 : order.grandTotal;
+
+          await prisma.$transaction(async (tx) => {
+            await tx.order.update({
+              where: { id: order.id },
+              data: {
+                paymentStatus: 'CONFIRMED',
+                orderStatus: 'PRODUCTION_QUEUE',
+                currentDepartment: 'PRODUCTION',
+                assignedStaffName: 'Press Supervisor',
+                proofStatus: 'APPROVED',
+                proofApprovedAt: new Date(),
+              },
+            });
+
+            await tx.payment.create({
+              data: {
+                orderId: order.id,
+                amount: amountPaid,
+                status: 'SUCCESS',
+                paymentMethod: paymentEntity.method ? paymentEntity.method.toUpperCase() : 'ONLINE_WEBHOOK',
+                transactionId: paymentId,
+                paymentMetadata: JSON.stringify({
+                  source: 'WEBHOOK',
+                  event,
+                  verifiedAt: new Date().toISOString(),
+                }),
+              },
+            });
+
+            await tx.orderStatusHistory.create({
+              data: {
+                orderId: order.id,
+                previousStatus: order.orderStatus,
+                newStatus: 'PRODUCTION_QUEUE',
+                note: `Payment of ₹${amountPaid} verified asynchronously via Webhook (${paymentId}). Released to Press Production.`,
+                customerNote: 'Your payment was successfully verified. Your order is confirmed and queued for printing!',
+              },
+            });
+
+            for (const job of order.productionJobs) {
+              await tx.productionJob.update({
+                where: { id: job.id },
+                data: { status: 'QUEUED', artworkStatus: 'APPROVED' },
+              });
+            }
+
+            await tx.invoice.updateMany({
+              where: { orderId: order.id },
+              data: {
+                paymentStatus: 'PAID',
+                amountPaid,
+                balanceDue: 0,
+                transactionReference: paymentId,
+              },
+            });
+
+            await tx.auditLog.create({
+              data: {
+                action: 'PAYMENT_WEBHOOK_VERIFIED',
+                entityName: 'ORDER',
+                entityId: order.id,
+                newValues: JSON.stringify({
+                  orderNumber: order.orderNumber,
+                  amountPaid,
+                  paymentId,
+                  event,
+                }),
+              },
+            });
+          });
+
+          sendOrderNotification({
+            order: { ...order, orderStatus: 'PRODUCTION_QUEUE', paymentStatus: 'CONFIRMED' },
+            eventType: 'ORDER_CONFIRMED',
+          }).catch((err) => console.error('[WEBHOOK NOTIFICATION FAILED]', err.message));
+        }
+      }
+    }
+
+    return res.json({ status: 'ok', received: true });
+  } catch (webhookErr) {
+    console.error('Payment webhook error:', webhookErr);
+    return res.status(500).json({ success: false, message: 'Webhook processing error' });
+  }
+};
+
 

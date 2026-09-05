@@ -62,6 +62,23 @@ export function CustomerAuthProvider({ children }) {
     throw new Error(res.message || 'Signup failed');
   };
 
+  const sendOtp = async (mobile) => {
+    return await api.sendCustomerOtp({ mobile });
+  };
+
+  const verifyOtp = async (mobile, otp, name) => {
+    const res = await api.verifyCustomerOtp({ mobile, otp, name });
+    if (res.success) {
+      if (res.token) {
+        localStorage.setItem('pb_customer_token', res.token);
+        setToken(res.token);
+      }
+      setCustomer(res.customer);
+      return res;
+    }
+    throw new Error(res.message || 'OTP verification failed');
+  };
+
   const logoutCustomer = async () => {
     try {
       await api.customerLogout();
@@ -83,6 +100,8 @@ export function CustomerAuthProvider({ children }) {
         isCorporate: customer?.accountType === 'B2B_CORPORATE',
         loginCustomer,
         signupCustomer,
+        sendOtp,
+        verifyOtp,
         logoutCustomer,
         refreshProfile: fetchCustomerProfile,
       }}

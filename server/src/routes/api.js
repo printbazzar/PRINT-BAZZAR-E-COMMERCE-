@@ -77,6 +77,8 @@ import {
   getCustomerOrders,
   addCustomerAddress,
   reorderPreviousOrder,
+  sendCustomerOtp,
+  verifyCustomerOtp,
 } from '../controllers/customerAuthController.js';
 import { getCsrfTokenEndpoint } from '../middleware/csrfProtection.js';
 import {
@@ -135,6 +137,7 @@ import {
   createPaymentSession,
   verifyPayment,
   convertToCod,
+  handlePaymentWebhook,
 } from '../controllers/paymentController.js';
 import {
   adminLoginLimiter,
@@ -163,6 +166,8 @@ const router = express.Router();
 // ==========================================
 router.post('/customer/auth/signup', customerSignupLimiter, customerSignup);
 router.post('/customer/auth/login', customerLoginLimiter, customerLogin);
+router.post('/customer/auth/send-otp', customerLoginLimiter, sendCustomerOtp);
+router.post('/customer/auth/verify-otp', verifyCustomerOtp);
 router.post('/customer/auth/refresh', customerRefreshToken);
 router.post('/customer/auth/logout', customerLogout);
 router.get('/customer/account/profile', authenticateCustomer, getCustomerProfile);
@@ -196,10 +201,11 @@ router.get('/artwork/:id', authenticateCustomerOrAdmin, getArtworkUploadById);
 router.post('/orders/:orderNumber/approve-proof', approveCustomerProof);
 router.get('/orders/:orderId/invoice', optionalCustomerOrAdmin, getOrderInvoice);
 
-// Payment Gateway Verification (Online Orders)
+// Payment Gateway Verification & Webhook (Online Orders)
 router.post('/payments/create-order', createPaymentSession);
 router.post('/payments/verify', verifyPayment);
 router.post('/payments/convert-to-cod', convertToCod);
+router.post('/payments/webhook', handlePaymentWebhook);
 
 // Public Design Services Routes
 router.get('/design-services/packages', getDesignPackages);

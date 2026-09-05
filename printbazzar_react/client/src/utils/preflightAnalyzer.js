@@ -233,11 +233,12 @@ export async function analyzeArtworkFile(file, productSlug = '', categorySlug = 
         status: 'PASS',
         message: 'Native press color channels verified.',
       },
-      previewUrl: null,
+      previewUrl: fileExtension === 'pdf' && typeof window !== 'undefined' ? URL.createObjectURL(file) : null,
+      pageCount: 1,
       issues: [],
       warnings: [],
       passedChecks: [
-        'Vector format allows lossless resizing',
+        'Vector / Prepress format allows lossless scaling',
         'Standard bleed and crop marks supported',
         'Direct Heidelberg / Konica Minolta RIP compatible',
       ],
@@ -284,7 +285,7 @@ export async function analyzeArtworkFile(file, productSlug = '', categorySlug = 
         let dpiMessage = '';
         if (effectiveDpi >= standard.recommendedDpi) {
           dpiStatus = 'PASS';
-          dpiMessage = `${effectiveDpi} DPI — Ultra Crisp High Definition (100% Print-Ready).`;
+          dpiMessage = `${effectiveDpi} DPI — High Definition (Print Ready).`;
           passedChecks.push(`High resolution print quality (${effectiveDpi} DPI)`);
         } else if (effectiveDpi >= standard.minDpi) {
           dpiStatus = 'WARNING';
@@ -301,7 +302,7 @@ export async function analyzeArtworkFile(file, productSlug = '', categorySlug = 
         let sizeMessage = '';
         if (ratioDeviation <= 0.05) {
           sizeStatus = 'PASS';
-          sizeMessage = `Perfect proportions! Artwork matches ${standard.name} (${standard.trimWidthMm} x ${standard.trimHeightMm} mm).`;
+          sizeMessage = `Proportions match ${standard.name} (${standard.trimWidthMm} x ${standard.trimHeightMm} mm).`;
           passedChecks.push('Artwork proportions match physical product trim size');
         } else if (ratioDeviation <= 0.15) {
           sizeStatus = 'WARNING';
@@ -348,7 +349,7 @@ export async function analyzeArtworkFile(file, productSlug = '', categorySlug = 
 
         let overallStatus = 'PASS';
         if (issues.length > 0) {
-          overallStatus = 'ERROR';
+          overallStatus = 'BLOCK';
         } else if (warnings.length > 0) {
           overallStatus = 'WARNING';
         }

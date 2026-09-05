@@ -120,6 +120,8 @@ export const createOrder = async (req, res) => {
         specificationsSnapshot: JSON.stringify(product.specifications || []),
         optionsSnapshot: JSON.stringify({
           ...(item.selectedOptions || {}),
+          ...(item.artworkVersion ? { _artworkVersion: item.artworkVersion } : {}),
+          ...(item.artworkAcknowledged !== undefined ? { _artworkAcknowledged: item.artworkAcknowledged } : {}),
           ...(item.preflightReport ? { _preflight: item.preflightReport } : {}),
         }),
         configurationSnapshot: JSON.stringify({
@@ -256,6 +258,7 @@ export const createOrder = async (req, res) => {
               previousStatus: null,
               newStatus: initialStatus,
               note: initialStatusNote,
+              customerNote: 'Order received. We are verifying your print specifications and preparing your job.',
             },
           },
           payments: {
@@ -522,6 +525,7 @@ export const trackOrder = async (req, res) => {
             previousStatus: true,
             newStatus: true,
             note: true,
+            customerNote: true,
             createdAt: true,
           },
         },

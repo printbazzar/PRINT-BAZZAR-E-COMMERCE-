@@ -1,7 +1,7 @@
 import React from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Button, Breadcrumb } from 'flowbite-react';
-import { HiHome, HiTrash, HiOutlineShoppingBag, HiArrowRight } from 'react-icons/hi';
+import { HiHome, HiTrash, HiOutlineShoppingBag, HiArrowRight, HiOutlinePencil } from 'react-icons/hi';
 import { useCart } from '../context/CartContext';
 import Feedback from '../Components/Feedback';
 
@@ -65,13 +65,23 @@ export default function Cart() {
                     <h3 className="font-bold text-gray-900 text-lg">{item.product?.name}</h3>
                     <p className="text-xs text-gray-500 font-medium">SKU: {item.product?.sku}</p>
                   </div>
-                  <button
-                    onClick={() => removeFromCart(item.cartItemId)}
-                    className="text-red-500 hover:text-red-700 p-1"
-                    title="Remove item"
-                  >
-                    <HiTrash className="w-5 h-5" />
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <Link
+                      to={`/product/${item.product?.slug}`}
+                      state={{ editCartItem: item }}
+                      className="inline-flex items-center gap-1 text-xs font-bold text-blue-700 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-2.5 py-1 rounded-lg transition shadow-2xs"
+                      title="Edit this configuration"
+                    >
+                      <HiOutlinePencil className="w-3.5 h-3.5" /> Edit Config
+                    </Link>
+                    <button
+                      onClick={() => removeFromCart(item.cartItemId)}
+                      className="text-red-500 hover:text-red-700 p-1 rounded-lg hover:bg-red-50 transition"
+                      title="Remove item"
+                    >
+                      <HiTrash className="w-5 h-5" />
+                    </button>
+                  </div>
                 </div>
 
                 {/* Options Chips */}
@@ -98,10 +108,15 @@ export default function Cart() {
 
                 {/* Artwork & Design Package Status */}
                 {item.artworkOption === 'DESIGN_SUPPORT' ? (
-                  <div className="mt-2 space-y-1">
-                    <span className="inline-block text-xs bg-purple-100 text-purple-950 font-bold px-2.5 py-1 rounded-md border border-purple-200">
-                      🎨 Design Support: {item.designPackageName || (item.designPackage ? (item.designPackage.packageName || item.designPackage.name) : 'Package')} (+₹{item.designFee || 0})
-                    </span>
+                  <div className="mt-2.5 space-y-1 bg-purple-50/50 p-3 rounded-xl border border-purple-200">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="inline-block text-xs bg-purple-100 text-purple-950 font-bold px-2.5 py-0.5 rounded-md border border-purple-200">
+                        🎨 Design Support: {item.designPackageName || (item.designPackage ? (item.designPackage.packageName || item.designPackage.name) : 'Package')} (+₹{item.designFee || 0})
+                      </span>
+                      <span className="text-[11px] font-bold text-purple-700 bg-purple-100/80 px-2 py-0.5 rounded-full">
+                        Design Studio Routing
+                      </span>
+                    </div>
                     {Array.isArray(item.selectedAddons) && item.selectedAddons.length > 0 && (
                       <div className="flex flex-wrap gap-1 mt-1">
                         {item.selectedAddons.map((addon, adx) => (
@@ -112,13 +127,13 @@ export default function Cart() {
                       </div>
                     )}
                     {item.designBriefResponses && Object.keys(item.designBriefResponses).length > 0 && (
-                      <p className="text-[11px] text-gray-500">
-                        📋 {Object.keys(item.designBriefResponses).length} design brief detail(s) provided
+                      <p className="text-[11px] text-gray-600">
+                        📋 {Object.keys(item.designBriefResponses).length} design brief detail(s) attached
                       </p>
                     )}
                     {item.preferredStyle && (
-                      <p className="text-[11px] text-gray-500">
-                        ✨ Style: {item.preferredStyle}
+                      <p className="text-[11px] text-gray-600">
+                        ✨ Style: <strong className="text-gray-900">{item.preferredStyle}</strong>
                       </p>
                     )}
                     {item.termsAccepted && (
@@ -128,21 +143,37 @@ export default function Cart() {
                     )}
                   </div>
                 ) : (
-                  <div className="mt-2 space-y-1">
-                    <span className="inline-block text-xs bg-blue-100 text-blue-900 font-bold px-2 py-0.5 rounded">
-                      📄 Print-Ready File Attached
-                    </span>
+                  <div className="mt-2.5 space-y-1.5 bg-blue-50/40 p-3 rounded-xl border border-blue-200">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="inline-block text-xs bg-blue-100 text-blue-900 font-bold px-2.5 py-0.5 rounded">
+                        📄 Print-Ready File
+                      </span>
+                      {item.artworkVersion && (
+                        <span className="text-[11px] font-mono font-bold bg-white text-gray-800 px-2 py-0.5 rounded border border-gray-300 shadow-2xs">
+                          {item.artworkVersion}
+                        </span>
+                      )}
+                      {item.preflightReport?.status === 'PASS' ? (
+                        <span className="text-[11px] font-bold text-green-700 bg-green-100 border border-green-300 px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                          🟢 Preflight Passed ({item.preflightReport.dpi || 300} DPI)
+                        </span>
+                      ) : (item.preflightReport?.status === 'WARNING' || item.preflightReport?.status === 'ERROR') ? (
+                        <span className="text-[11px] font-bold text-yellow-800 bg-yellow-100 border border-yellow-300 px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                          🟡 Quality Warning Acknowledged
+                        </span>
+                      ) : null}
+                    </div>
                     {item.artworkFileName && (
-                      <p className="text-xs text-green-700 font-medium flex items-center gap-1">
-                        📎 {item.artworkFileName}
+                      <p className="text-xs text-gray-800 font-medium flex items-center gap-1">
+                        📎 <span className="font-semibold">{item.artworkFileName}</span>
                         {item.artworkFileUrl && (
                           <a
                             href={item.artworkFileUrl}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="text-blue-600 underline text-[11px] ml-1"
+                            className="text-blue-600 underline text-[11px] ml-1 font-bold hover:text-blue-800"
                           >
-                            (View)
+                            (View Artwork ↗)
                           </a>
                         )}
                       </p>
@@ -190,18 +221,28 @@ export default function Cart() {
 
             <div className="space-y-3 text-sm text-gray-600">
               <div className="flex justify-between">
-                <span>Subtotal ({cartItems.length} items):</span>
+                <span>Taxable Items Subtotal:</span>
                 <span className="font-semibold text-gray-900">₹{cartSubtotal}</span>
               </div>
               <div className="flex justify-between">
-                <span>Estimated Shipping:</span>
+                <span>Delivery & Handling:</span>
                 <span className="font-semibold text-gray-900">
-                  {cartShipping === 0 ? <span className="text-green-600">FREE</span> : `₹${cartShipping}`}
+                  {cartShipping === 0 ? <span className="text-green-600 font-bold">FREE (₹0)</span> : `₹${cartShipping}`}
                 </span>
               </div>
-              <div className="flex justify-between">
-                <span>GST (18% included):</span>
-                <span className="font-semibold text-gray-900">₹{Math.round((cartSubtotal * 18) / 100)}</span>
+              <div className="space-y-1.5 bg-gray-50 p-3 rounded-xl border border-gray-200 text-xs">
+                <div className="flex justify-between text-gray-800 font-bold">
+                  <span>Applicable GST (18% included):</span>
+                  <span className="text-gray-900">₹{Math.round((cartSubtotal * 18) / 100)}</span>
+                </div>
+                <div className="flex justify-between text-gray-500 pl-2">
+                  <span>• Central GST (CGST 9%):</span>
+                  <span>₹{Math.round((cartSubtotal * 9) / 100)}</span>
+                </div>
+                <div className="flex justify-between text-gray-500 pl-2">
+                  <span>• State GST (SGST 9%):</span>
+                  <span>₹{Math.round((cartSubtotal * 9) / 100)}</span>
+                </div>
               </div>
               <div className="flex justify-between text-lg font-bold text-gray-900 pt-3 border-t">
                 <span>Grand Total:</span>

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
 import { Breadcrumb, Button, Checkbox, Label, Modal, Select, Spinner, TextInput, Textarea } from 'flowbite-react';
 import {
   HiHome,
@@ -25,6 +25,7 @@ import { analyzeArtworkFile, getProductFileSpecifications } from '../utils/prefl
 import { useCart } from '../context/CartContext';
 import { useBusinessInfo } from '../context/BusinessInfoContext';
 import PreflightInspectionCard from '../Components/PreflightInspectionCard';
+import LargeArtworkPreviewModal from '../Components/LargeArtworkPreviewModal';
 import ProductMediaGallery from '../Components/ProductMediaGallery';
 import ProductInfoTabs from '../Components/ProductInfoTabs';
 import DeliveryEstimator from '../Components/DeliveryEstimator';
@@ -35,6 +36,7 @@ import Feedback from '../Components/Feedback';
 export default function ProductDetail() {
   const { slug } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const { addToCart } = useCart();
   const { businessInfo, getWhatsAppLink } = useBusinessInfo();
 
@@ -74,6 +76,8 @@ export default function ProductDetail() {
   const [preflightReport, setPreflightReport] = useState(null);
   const [isAnalyzingPreflight, setIsAnalyzingPreflight] = useState(false);
   const [disclaimerAccepted, setDisclaimerAccepted] = useState(false);
+  const [largePreviewOpen, setLargePreviewOpen] = useState(false);
+  const [artworkVersion, setArtworkVersion] = useState(1);
 
   // Pricing state
   const [pricing, setPricing] = useState({
@@ -160,6 +164,35 @@ export default function ProductDetail() {
           }
         } catch (addonErr) {
           console.error('Failed to load design add-ons:', addonErr);
+        }
+
+        // Check if editing existing configuration from Cart
+        if (location?.state?.editCartItem) {
+          const edit = location.state.editCartItem;
+          if (edit.quantity) setQuantity(edit.quantity);
+          if (edit.selectedOptions) setSelectedOptions(edit.selectedOptions);
+          if (edit.artworkOption) setArtworkOption(edit.artworkOption);
+          if (edit.artworkFileUrl) {
+            setArtworkUrl(edit.artworkFileUrl);
+            setUploadedArtwork({
+              id: edit.artworkUploadId,
+              fileUrl: edit.artworkFileUrl,
+              originalName: edit.artworkFileName,
+            });
+          }
+          if (edit.artworkVersion) {
+            const vNum = parseInt(String(edit.artworkVersion).replace(/\D/g, ''), 10);
+            if (!isNaN(vNum)) setArtworkVersion(vNum);
+          }
+          if (edit.preflightReport) setPreflightReport(edit.preflightReport);
+          if (edit.selectedPackage) setSelectedPackage(edit.selectedPackage);
+          if (edit.selectedAddons) setSelectedAddons(edit.selectedAddons);
+          if (edit.preferredStyle) setPreferredStyle(edit.preferredStyle);
+          if (edit.preferredColor) setPreferredColor(edit.preferredColor);
+          if (edit.requirementNotes) setRequirementNotes(edit.requirementNotes);
+          if (edit.designBriefResponses) setDesignBriefResponses(edit.designBriefResponses);
+          if (edit.designAssets) setDesignAssets(edit.designAssets);
+          if (edit.termsAccepted) setTermsAccepted(true);
         }
       }
     } catch (err) {
@@ -284,14 +317,25 @@ export default function ProductDetail() {
       const report = await analyzeArtworkFile(file, product?.slug, product?.category?.slug);
       setPreflightReport(report);
 
-      // 2. Upload file to Phase 16 artwork endpoint
+      const nextVersion = (artworkVersion || 1) + (uploadedArtwork ? 1 : 0);
+      setArtworkVersion(nextVersion);
+
+      // 2. Upload file to artwork endpoint with preflight metadata
       const res = await api.uploadArtworkFile(file, {
         productId: product?.id,
         purpose: 'PRINT_READY',
+        preflightStatus: report.status,
+        preflightReport: report,
+        customerAcknowledged: disclaimerAccepted,
+        dpi: report.dpi?.effectiveDpi || null,
+        width: typeof report.dimensions?.widthPx === 'number' ? report.dimensions.widthPx : null,
+        height: typeof report.dimensions?.heightPx === 'number' ? report.dimensions.heightPx : null,
       });
-      if (res.success && res.data) {
-        setUploadedArtwork(res.data);
-        setArtworkUrl(res.data.fileUrl);
+
+      const uploadData = res.upload || res.data;
+      if (res.success && uploadData) {
+        setUploadedArtwork(uploadData);
+        setArtworkUrl(res.fileUrl || uploadData.fileUrl);
       }
     } catch (err) {
       setUploadError(err.message || 'Artwork upload failed. Please try again.');
@@ -366,17 +410,23 @@ export default function ProductDetail() {
       return false;
     }
 
-    // 3. Option 1 Guard: Must have uploaded file & preflight check
+    // 3. Option 1 Guard: Must have uploaded file & strict 3-tier preflight check
     if (artworkOption === 'PRINT_READY_FILE') {
       if (!uploadedArtwork && !artworkFile) {
         alert('Please upload your print-ready artwork file before proceeding to cart.');
         return false;
       }
-      if (preflightReport?.status === 'ERROR' && !disclaimerAccepted) {
+      if (preflightReport?.status === 'BLOCK') {
         alert(
-          `🚨 CRITICAL PRINT QUALITY ALERT!\n\nYour uploaded file (${preflightReport.fileName}) has quality warnings (${
-            preflightReport.dpi?.effectiveDpi ? `${preflightReport.dpi.effectiveDpi} DPI` : 'Issues'
-          }).\n\nPlease acknowledge the confirmation disclaimer below the file upload or switch to "I Need Design Support".`
+          `🔴 CRITICAL PREFLIGHT BLOCK!\n\nYour uploaded file "${preflightReport.fileName || 'artwork'}" cannot be sent to industrial production due to severe dimension/aspect ratio mismatch or corruption.\n\nPlease click "Re-upload Corrected File" or switch to "I Need Design Support".`
+        );
+        return false;
+      }
+      if ((preflightReport?.status === 'WARNING' || preflightReport?.status === 'ERROR') && !disclaimerAccepted) {
+        alert(
+          `⚠️ TECHNICAL QUALITY ADVISORY!\n\nYour uploaded file (${preflightReport.fileName}) has potential quality warnings (${
+            preflightReport.dpi?.effectiveDpi ? `${preflightReport.dpi.effectiveDpi} DPI` : 'Advisories'
+          }).\n\nPlease check "I understand and want to proceed with this file" below the file upload card to acknowledge, or re-upload a high-resolution file.`
         );
         return false;
       }
@@ -434,6 +484,8 @@ export default function ProductDetail() {
       artworkFileUrl: uploadedArtwork?.fileUrl || artworkUrl || null,
       artworkFileName: uploadedArtwork?.originalName || artworkFile?.name || null,
       artworkUploadId: uploadedArtwork?.id || null,
+      artworkVersion: `V${artworkVersion || 1}`,
+      artworkAcknowledged: Boolean(disclaimerAccepted),
       designPackageId: selectedPackage?.id || null,
       designPackage: selectedPackage,
       designBriefResponses,
@@ -446,6 +498,7 @@ export default function ProductDetail() {
             score: preflightReport.score,
             dpi: preflightReport.dpi?.effectiveDpi || 300,
             fileType: preflightReport.fileType,
+            warnings: preflightReport.warnings || [],
           }
         : null,
       unitPrice: pricing.subtotal / quantity,
@@ -1150,6 +1203,7 @@ export default function ProductDetail() {
                 {preflightReport && (
                   <PreflightInspectionCard
                     report={preflightReport}
+                    onOpenLargeModal={() => setLargePreviewOpen(true)}
                     onReUploadClick={() => document.getElementById('artwork-upload')?.click()}
                     onSwitchToDesignService={() => {
                       setArtworkOption('DESIGN_SUPPORT');
@@ -1949,6 +2003,21 @@ export default function ProductDetail() {
           </div>
         </Modal.Body>
       </Modal>
+
+      {/* Large Technical Artwork Preflight Preview Modal */}
+      <LargeArtworkPreviewModal
+        show={largePreviewOpen}
+        onClose={() => setLargePreviewOpen(false)}
+        report={preflightReport}
+        file={artworkFile}
+        previewUrl={uploadedArtwork?.fileUrl || artworkUrl || preflightReport?.previewUrl}
+        onReUpload={() => {
+          setLargePreviewOpen(false);
+          document.getElementById('artwork-upload')?.click();
+        }}
+        disclaimerAccepted={disclaimerAccepted}
+        onToggleDisclaimer={() => setDisclaimerAccepted(!disclaimerAccepted)}
+      />
     </div>
   );
 }

@@ -441,7 +441,7 @@ export default function TrackOrder() {
                     <p className="text-xs font-bold text-gray-900">
                       {hist.newStatus?.replace(/_/g, ' ')}
                     </p>
-                    <p className="text-xs text-gray-600 mt-0.5">{hist.note}</p>
+                    <p className="text-xs text-gray-600 mt-0.5">{hist.customerNote || hist.note}</p>
                     <span className="text-[10px] text-gray-400 mt-0.5 block">
                       {new Date(hist.createdAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}
                     </span>

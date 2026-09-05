@@ -70,7 +70,25 @@ export const uploadArtworkFile = async (req, res) => {
     // 4. Upload to Supabase Storage (or local /uploads/)
     const storageResult = await uploadToStorage(file, 'artwork');
 
-    // 5. Persist upload metadata to database
+    // 5. Calculate artwork version (V1, V2, etc.) for this item
+    let version = 1;
+    if (cartItemId || orderId) {
+      const existingCount = await prisma.artworkUpload.count({
+        where: {
+          OR: [
+            cartItemId ? { cartItemId } : undefined,
+            orderId ? { orderId } : undefined,
+          ].filter(Boolean),
+        },
+      });
+      version = existingCount + 1;
+    }
+
+    // 6. Persist upload metadata to database
+    const preflightReportStr = req.body.preflightReport
+      ? (typeof req.body.preflightReport === 'string' ? req.body.preflightReport : JSON.stringify(req.body.preflightReport))
+      : null;
+
     const artworkUpload = await prisma.artworkUpload.create({
       data: {
         fileName: path.basename(storageResult.url),
@@ -83,13 +101,22 @@ export const uploadArtworkFile = async (req, res) => {
         customerId: customerId || null,
         cartItemId: cartItemId || null,
         orderId: orderId || null,
+        version,
+        preflightStatus: req.body.preflightStatus || 'PASS',
+        preflightReport: preflightReportStr,
+        customerAcknowledged: req.body.customerAcknowledged === 'true' || req.body.customerAcknowledged === true,
+        dpi: req.body.dpi ? parseInt(req.body.dpi, 10) : null,
+        width: req.body.width ? parseInt(req.body.width, 10) : null,
+        height: req.body.height ? parseInt(req.body.height, 10) : null,
       },
     });
 
     return res.status(201).json({
       success: true,
-      message: 'File uploaded and validated successfully.',
+      message: `File uploaded successfully as Version ${version}.`,
       fileUrl: artworkUpload.fileUrl,
+      version: artworkUpload.version,
+      versionLabel: `V${artworkUpload.version}`,
       upload: {
         id: artworkUpload.id,
         fileName: artworkUpload.fileName,
@@ -98,6 +125,9 @@ export const uploadArtworkFile = async (req, res) => {
         fileSize: artworkUpload.fileSize,
         fileUrl: artworkUpload.fileUrl,
         storageLocation: artworkUpload.storageLocation,
+        version: artworkUpload.version,
+        versionLabel: `V${artworkUpload.version}`,
+        preflightStatus: artworkUpload.preflightStatus,
         purpose: req.body?.purpose || 'PRINT_READY',
         createdAt: artworkUpload.createdAt,
       },

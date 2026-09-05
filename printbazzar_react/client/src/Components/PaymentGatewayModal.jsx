@@ -72,6 +72,7 @@ export default function PaymentGatewayModal({
   };
 
   const handleProcessPayment = async (simulated = true) => {
+    if (isVerifying || paymentSuccess) return;
     setIsVerifying(true);
     setErrorMsg('');
 

@@ -302,6 +302,8 @@ export const api = {
   // Customer Auth & Portal (B2B & B2C)
   customerSignup: (data) => request('/customer/auth/signup', { method: 'POST', body: data }),
   customerLogin: (data) => request('/customer/auth/login', { method: 'POST', body: data }),
+  sendCustomerOtp: (data) => request('/customer/auth/send-otp', { method: 'POST', body: data }),
+  verifyCustomerOtp: (data) => request('/customer/auth/verify-otp', { method: 'POST', body: data }),
   customerRefreshToken: () => request('/customer/auth/refresh', { method: 'POST' }),
   customerLogout: () => request('/customer/auth/logout', { method: 'POST' }),
   getCustomerProfile: () => request('/customer/account/profile'),
@@ -319,13 +321,28 @@ export const api = {
   updateStaff: (id, data) => request(`/admin/staff/${id}`, { method: 'PUT', body: data }),
   deleteStaff: (id) => request(`/admin/staff/${id}`, { method: 'DELETE' }),
 
-  // Phase 16: Customer Artwork & Design Assets Upload
+  // Customer Artwork & Design Assets Upload (with Versioning & Preflight Metadata)
   uploadArtworkFile: async (file, options = {}) => {
     const formData = new FormData();
     formData.append('file', file);
     if (options.productId) formData.append('productId', options.productId);
     if (options.customerId) formData.append('customerId', options.customerId);
+    if (options.cartItemId) formData.append('cartItemId', options.cartItemId);
+    if (options.orderId) formData.append('orderId', options.orderId);
     if (options.purpose) formData.append('purpose', options.purpose);
+    if (options.preflightStatus) formData.append('preflightStatus', options.preflightStatus);
+    if (options.preflightReport) {
+      formData.append(
+        'preflightReport',
+        typeof options.preflightReport === 'string' ? options.preflightReport : JSON.stringify(options.preflightReport)
+      );
+    }
+    if (options.customerAcknowledged !== undefined) {
+      formData.append('customerAcknowledged', String(options.customerAcknowledged));
+    }
+    if (options.dpi) formData.append('dpi', String(options.dpi));
+    if (options.width) formData.append('width', String(options.width));
+    if (options.height) formData.append('height', String(options.height));
 
     const csrf = getCsrfToken();
     const res = await fetch(`${API_BASE_URL}/artwork/upload`, {

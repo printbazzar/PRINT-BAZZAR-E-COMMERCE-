@@ -409,6 +409,8 @@ model Customer {
   city                 String?
   state                String?
   pincode              String?
+  otpCode              String?
+  otpExpiresAt         DateTime?
   createdAt            DateTime          @default(now())
   updatedAt            DateTime          @updatedAt
 
@@ -575,6 +577,7 @@ model OrderStatusHistory {
   changedByUserId String?
   changedBy       User?    @relation(fields: [changedByUserId], references: [id])
   note            String?
+  customerNote    String?
   createdAt       DateTime @default(now())
 }
 
@@ -702,6 +705,11 @@ model ArtworkUpload {
   dpi             Int?
   width           Int?
   height          Int?
+  version         Int      @default(1)
+  preflightStatus String?  // PASS, WARNING, BLOCK
+  preflightReport String?  // JSON preflight metrics & checks
+  customerAcknowledged Boolean @default(false)
+  isApproved      Boolean  @default(false)
   createdAt       DateTime @default(now())
 }
 
