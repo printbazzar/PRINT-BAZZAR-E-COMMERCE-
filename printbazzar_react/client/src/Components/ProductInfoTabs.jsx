@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Tabs, Accordion, Button, TextInput, Textarea, Modal, Rating } from 'flowbite-react';
 import {
   HiStar,
@@ -13,10 +13,19 @@ import {
 } from 'react-icons/hi';
 import { FaWhatsapp, FaYoutube } from 'react-icons/fa';
 import { useBusinessInfo } from '../context/BusinessInfoContext';
+import { extractYouTubeId, getYouTubeEmbedUrl, isDirectVideoFile } from '../utils/videoUtils';
 
-export default function ProductInfoTabs({ product }) {
+export default function ProductInfoTabs({ product, requestedTab, onTabHandled }) {
   const { businessInfo, getWhatsAppLink } = useBusinessInfo();
   const [activeTab, setActiveTab] = useState(0);
+  const tabsRef = useRef(null);
+
+  useEffect(() => {
+    if (requestedTab !== undefined && requestedTab !== null && tabsRef.current) {
+      tabsRef.current.setActiveTab(requestedTab);
+      if (onTabHandled) onTabHandled();
+    }
+  }, [requestedTab, onTabHandled]);
 
   // Review Form Modal
   const [reviewModalOpen, setReviewModalOpen] = useState(false);
@@ -88,7 +97,12 @@ export default function ProductInfoTabs({ product }) {
 
   return (
     <div className="bg-white rounded-2xl border border-gray-200 p-6 sm:p-8 shadow-xs">
-      <Tabs aria-label="Product In-Depth Specifications & Content" variant="underline">
+      <Tabs
+        ref={tabsRef}
+        aria-label="Product In-Depth Specifications & Content"
+        variant="underline"
+        onActiveTabChange={(tab) => setActiveTab(tab)}
+      >
         {/* 1. TECHNICAL SPECIFICATIONS & OVERVIEW */}
         <Tabs.Item active title="📋 Technical Specs" icon={HiOutlineDocumentText}>
           <div className="pt-4 grid grid-cols-1 lg:grid-cols-12 gap-8">
@@ -131,70 +145,141 @@ export default function ProductInfoTabs({ product }) {
           </div>
         </Tabs.Item>
 
-        {/* 2. PRODUCT VIDEO DEMO */}
+        {/* 2. PRODUCT VIDEO DEMO (INLINE YOUTUBE / MATERIAL & SIZE SHOWCASE) */}
         <Tabs.Item title="🎥 Video Showcase" icon={HiOutlinePlay}>
-          <div className="pt-4 max-w-4xl space-y-4 text-xs">
+          <div className="pt-4 max-w-4xl space-y-6 text-xs">
             <div>
-              <h3 className="font-black text-base text-gray-900 flex items-center gap-2">
-                <HiOutlinePlay className="w-5 h-5 text-red-600" /> Live Paper Finish & Quality Demonstration
-              </h3>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="font-black text-base sm:text-lg text-gray-900 flex items-center gap-2">
+                  <FaYoutube className="w-5 h-5 text-red-600" />
+                  Material, Size & Finish Showcase Video
+                </h3>
+                <span className="text-[11px] font-bold text-green-700 bg-green-50 border border-green-200 px-3 py-1 rounded-full flex items-center gap-1.5">
+                  <HiCheckCircle className="w-4 h-4 text-green-600" />
+                  In-Website Full HD Playback
+                </span>
+              </div>
               <p className="text-gray-500 mt-1">
-                Watch how the 350 GSM card stock, velvet soft-touch coating, and sharp offset CMYK printing look under natural lighting.
+                Watch how the paper stock, tactile lamination finish, and high-definition printing look in real life under natural lighting.
               </p>
             </div>
 
             {/* Embedded Responsive Video / Showcase Player */}
-            <div className="relative aspect-video w-full rounded-2xl overflow-hidden bg-gradient-to-br from-gray-900 to-black shadow-lg border border-gray-800 flex items-center justify-center group">
-              {product?.videoUrl && !product.videoUrl.includes('dQw4w9WgXcQ') ? (
-                (product.videoUrl.endsWith('.mp4') ||
-                  product.videoUrl.endsWith('.webm') ||
-                  product.videoUrl.endsWith('.mov') ||
-                  product.videoUrl.startsWith('/uploads/')) ? (
-                  <video
-                    src={product.videoUrl}
-                    controls
-                    className="w-full h-full object-contain"
-                    preload="metadata"
-                  >
-                    Your browser does not support HTML5 video preview.
-                  </video>
-                ) : (
-                  <iframe
-                    className="w-full h-full"
-                    src={product.videoUrl.replace('watch?v=', 'embed/')}
-                    title={`${product?.name} Video Showcase`}
-                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                    allowFullScreen
-                  />
-                )
-              ) : (
-                <div className="p-6 text-center space-y-2 max-w-md">
-                  <div className="w-12 h-12 rounded-full bg-yellow-400/20 text-yellow-400 flex items-center justify-center mx-auto mb-2">
-                    <HiOutlinePlay className="w-6 h-6" />
+            {(() => {
+              const videoSrc = product?.videoUrl;
+              const ytEmbedUrl = videoSrc ? getYouTubeEmbedUrl(videoSrc) : null;
+              const isDirect = videoSrc ? isDirectVideoFile(videoSrc) : false;
+
+              if (ytEmbedUrl) {
+                return (
+                  <div className="space-y-3">
+                    <div className="relative aspect-video w-full rounded-2xl overflow-hidden bg-black shadow-xl border border-gray-800">
+                      <iframe
+                        className="w-full h-full"
+                        src={ytEmbedUrl}
+                        title={`${product?.name || 'Product'} Video Showcase`}
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                        allowFullScreen
+                        loading="lazy"
+                      />
+                    </div>
+                    <div className="flex flex-wrap items-center justify-between text-[11px] text-gray-500 px-1 gap-2">
+                      <span className="flex items-center gap-1 font-medium text-gray-700">
+                        <HiCheckCircle className="w-4 h-4 text-green-600" /> Playing directly on website (Zero redirection to external apps)
+                      </span>
+                      <span className="text-gray-400">1080p HD Video Player</span>
+                    </div>
                   </div>
-                  <h4 className="text-white font-bold text-sm">Industrial Production & Material Showcase</h4>
-                  <p className="text-gray-400 text-xs leading-relaxed">
-                    Precision offset printing and premium velvet / gloss lamination available for {product?.name || 'custom stationery'}.
-                  </p>
-                  <span className="inline-block bg-gray-800 text-yellow-400 text-[10px] font-semibold px-3 py-1 rounded-full border border-gray-700">
-                    Industrial Offset Facility • {businessInfo.address?.city || 'Trichy'}
-                  </span>
-                </div>
-              )}
+                );
+              } else if (isDirect) {
+                return (
+                  <div className="space-y-3">
+                    <div className="relative aspect-video w-full rounded-2xl overflow-hidden bg-black shadow-xl border border-gray-800 flex items-center justify-center">
+                      <video
+                        src={videoSrc}
+                        controls
+                        playsInline
+                        className="w-full h-full object-contain"
+                        preload="metadata"
+                      >
+                        Your browser does not support HTML5 video preview.
+                      </video>
+                    </div>
+                    <div className="flex items-center justify-between text-[11px] text-gray-500 px-1">
+                      <span className="flex items-center gap-1 font-medium text-gray-700">
+                        <HiCheckCircle className="w-4 h-4 text-green-600" /> Direct High-Definition Video Preview
+                      </span>
+                    </div>
+                  </div>
+                );
+              } else {
+                return (
+                  <div className="relative aspect-video w-full rounded-2xl overflow-hidden bg-gradient-to-br from-slate-900 via-gray-900 to-black shadow-xl border border-gray-800 flex items-center justify-center p-6 text-center">
+                    <div className="max-w-md space-y-3">
+                      <div className="w-14 h-14 rounded-2xl bg-red-600/20 text-red-500 flex items-center justify-center mx-auto border border-red-500/30 shadow-inner">
+                        <FaYoutube className="w-8 h-8" />
+                      </div>
+                      <h4 className="text-white font-extrabold text-base">Commercial Press & Material Demo</h4>
+                      <p className="text-gray-300 text-xs leading-relaxed">
+                        Every batch of <strong>{product?.name || 'custom prints'}</strong> is crafted on European industrial presses with premium heavy GSM papers and precision thermal lamination.
+                      </p>
+                      <div className="pt-2 flex flex-wrap justify-center gap-2">
+                        <span className="bg-white/10 text-yellow-300 text-[11px] font-semibold px-3 py-1 rounded-full border border-white/10">
+                          Heidelberg & Konica Minolta Fleet
+                        </span>
+                        <span className="bg-white/10 text-emerald-300 text-[11px] font-semibold px-3 py-1 rounded-full border border-white/10">
+                          Velvet / Matte / Gloss Lamination
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
+            })()}
+
+            {/* Informative Material & Size Breakdown Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
+              <div className="p-4 bg-gray-50 border border-gray-200 rounded-xl space-y-1.5">
+                <span className="text-xs font-black text-gray-900 uppercase tracking-wider block flex items-center gap-1">
+                  📜 Material & GSM
+                </span>
+                <p className="text-gray-600 text-[11px] leading-relaxed">
+                  Heavyweight rigid paper cardstock engineered for durability, zero show-through, and crisp tactile thickness in hand.
+                </p>
+              </div>
+
+              <div className="p-4 bg-gray-50 border border-gray-200 rounded-xl space-y-1.5">
+                <span className="text-xs font-black text-gray-900 uppercase tracking-wider block flex items-center gap-1">
+                  ✨ Lamination Finish
+                </span>
+                <p className="text-gray-600 text-[11px] leading-relaxed">
+                  Thermal matte, velvet soft-touch, or crystal gloss coating that shields against scuffs, moisture spills, and fingerprint smudges.
+                </p>
+              </div>
+
+              <div className="p-4 bg-gray-50 border border-gray-200 rounded-xl space-y-1.5">
+                <span className="text-xs font-black text-gray-900 uppercase tracking-wider block flex items-center gap-1">
+                  📐 Real-Life Scale & Cut
+                </span>
+                <p className="text-gray-600 text-[11px] leading-relaxed">
+                  Computerized hydraulic die-cutting ensures millimeter-accurate borders, perfect corner alignment, and clean edges.
+                </p>
+              </div>
             </div>
 
+            {/* Swatch kit / WhatsApp Assistance */}
             <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-xl flex flex-col sm:flex-row justify-between items-center gap-3">
               <div>
-                <span className="font-bold text-yellow-900 block text-xs">Want physical sample papers?</span>
-                <span className="text-[11px] text-yellow-800">Visit our {businessInfo.address?.city || 'Trichy'} press facility or request a sample swatch kit.</span>
+                <span className="font-bold text-yellow-950 block text-xs">Need physical paper swatches or custom thickness guidance?</span>
+                <span className="text-[11px] text-yellow-800">Chat directly with our printing press technical team on WhatsApp or request a physical sample kit.</span>
               </div>
               <a
-                href={getWhatsAppLink(`Hello ${businessInfo.brand?.brandName || 'Print Bazzar'}, I would like to request paper samples for ${product?.name || 'custom prints'}.`)}
+                href={getWhatsAppLink(`Hello ${businessInfo.brand?.brandName || 'Print Bazzar'}, I would like to check paper thickness & material swatches for ${product?.name || 'custom prints'}.`)}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 bg-green-600 hover:bg-green-700 text-white font-bold px-3.5 py-1.5 rounded-lg text-xs"
+                className="inline-flex items-center gap-1.5 bg-green-600 hover:bg-green-700 text-white font-bold px-3.5 py-2 rounded-lg text-xs whitespace-nowrap shadow-xs transition-colors"
               >
-                <FaWhatsapp className="w-4 h-4" /> Request Sample Kit
+                <FaWhatsapp className="w-4 h-4" /> Ask Paper Expert
               </a>
             </div>
           </div>

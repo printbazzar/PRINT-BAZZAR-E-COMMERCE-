@@ -92,6 +92,7 @@ async function run15PointVerification() {
       machineCostRate: 85.0,
       clickCostRate: 12.5,
       vendorCost: 250.0,
+      videoUrl: 'https://youtu.be/sample12345',
       priceVersions: [
         {
           id: 'pv_1',
@@ -106,11 +107,11 @@ async function run15PointVerification() {
     const leakedProductKeys = ['markupPercentage', 'materialCostRate', 'machineCostRate', 'clickCostRate', 'vendorCost', 'priceVersions'];
     const hasProductLeak = leakedProductKeys.some(k => safeProduct[k] !== undefined);
 
-    if (!hasProductLeak && safeProduct.priceVersions === undefined) {
-      console.log('  ✔ PASS: toCustomerSafeProduct completely stripped confidential costs, formulas, and internal priceVersions.');
+    if (!hasProductLeak && safeProduct.priceVersions === undefined && safeProduct.videoUrl === 'https://youtu.be/sample12345') {
+      console.log('  ✔ PASS: toCustomerSafeProduct completely stripped confidential costs and preserved customer videoUrl.');
       passedTests++;
     } else {
-      throw new Error('Confidential product data was not stripped');
+      throw new Error('Confidential product data was not stripped or videoUrl missing');
     }
 
     // -----------------------------------------------------------------

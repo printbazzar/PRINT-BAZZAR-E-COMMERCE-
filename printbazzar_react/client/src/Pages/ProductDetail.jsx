@@ -78,6 +78,7 @@ export default function ProductDetail() {
   const [disclaimerAccepted, setDisclaimerAccepted] = useState(false);
   const [largePreviewOpen, setLargePreviewOpen] = useState(false);
   const [artworkVersion, setArtworkVersion] = useState(1);
+  const [activeInfoTab, setActiveInfoTab] = useState(null);
 
   // Pricing state
   const [pricing, setPricing] = useState({
@@ -579,6 +580,7 @@ export default function ProductDetail() {
               videoUrl={product.videoUrl || null}
               isBestSeller={product.isBestSeller}
               onOpenVideoTab={() => {
+                setActiveInfoTab(1);
                 const tabsEl = document.getElementById('product-info-tabs-section');
                 if (tabsEl) {
                   tabsEl.scrollIntoView({ behavior: 'smooth' });
@@ -1936,7 +1938,11 @@ export default function ProductDetail() {
 
       {/* Comprehensive Product Info Tabs: Specs, Video Demo, Guidelines, FAQs, Terms & Verified Reviews */}
       <div id="product-info-tabs-section" className="mt-12">
-        <ProductInfoTabs product={product} />
+        <ProductInfoTabs
+          product={product}
+          requestedTab={activeInfoTab}
+          onTabHandled={() => setActiveInfoTab(null)}
+        />
       </div>
 
       {/* Guide Banner */}

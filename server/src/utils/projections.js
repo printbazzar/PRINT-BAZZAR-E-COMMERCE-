@@ -125,6 +125,7 @@ export function toCustomerSafeProduct(product) {
     sku: product.sku,
     shortDescription: product.shortDescription,
     description: product.description,
+    videoUrl: product.videoUrl || null,
     startingPrice: product.startingPrice,
     unit: product.unit || 'piece',
     pricingMethod: product.pricingMethod,

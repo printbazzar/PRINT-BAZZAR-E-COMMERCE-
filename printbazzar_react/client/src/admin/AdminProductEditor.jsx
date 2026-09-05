@@ -15,8 +15,10 @@ import {
   HiOutlineClipboardList,
   HiOutlineAdjustments,
 } from 'react-icons/hi';
+import { FaYoutube } from 'react-icons/fa';
 import { api } from '../services/api';
 import AdminMediaUploader from '../Components/AdminMediaUploader';
+import { extractYouTubeId, getYouTubeEmbedUrl, isDirectVideoFile } from '../utils/videoUtils';
 
 const DEFAULT_PRINT_TERMS = `### Print Bazzar Design Support Terms & Conditions
 
@@ -1317,25 +1319,105 @@ export default function AdminProductEditor() {
                 />
               </div>
 
-              {/* Section 2: Product Video Showcase */}
-              <div className="bg-white p-5 rounded-2xl border shadow-xs space-y-3">
+              {/* Section 2: Product Video Showcase (YouTube Hosted) */}
+              <div className="bg-white p-5 rounded-2xl border shadow-xs space-y-4">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                  <div>
+                    <h3 className="font-extrabold text-sm text-gray-900 flex items-center gap-1.5">
+                      <FaYoutube className="w-5 h-5 text-red-600" />
+                      Product Showcase Video (YouTube Hosted)
+                    </h3>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      Paste your YouTube video link below to demonstrate paper stock (GSM), lamination textures, and dimensions to customers.
+                    </p>
+                  </div>
+                  <span className="text-[11px] font-bold text-green-700 bg-green-50 border border-green-200 px-2.5 py-1 rounded-full flex items-center gap-1">
+                    ✔ Zero Server Storage Used
+                  </span>
+                </div>
+
                 <div>
-                  <h3 className="font-extrabold text-sm text-gray-900 flex items-center gap-1.5">
-                    <HiOutlineVideoCamera className="w-4 h-4 text-purple-600" />
-                    Product Showcase Video (Optional)
-                  </h3>
-                  <p className="text-xs text-gray-500">
-                    Upload an MP4 / WebM demo video showing product unboxing, paper texture, or finish quality.
+                  <Label value="YouTube Video Link or Video ID" className="text-xs font-bold mb-1.5 block" />
+                  <div className="relative">
+                    <TextInput
+                      type="text"
+                      placeholder="e.g. https://www.youtube.com/watch?v=... or https://youtu.be/... or Video ID"
+                      value={formData.videoUrl || ''}
+                      onChange={(e) => setFormData({ ...formData, videoUrl: e.target.value.trim() })}
+                      className="text-xs font-mono"
+                    />
+                  </div>
+                  <p className="text-[11px] text-gray-400 mt-1">
+                    Supports standard watch URLs, short URLs (<code>youtu.be</code>), YouTube Shorts, or 11-digit Video IDs. Plays inline on website without redirecting!
                   </p>
                 </div>
 
-                <AdminMediaUploader
-                  label="Upload Product Video File"
-                  value={formData.videoUrl}
-                  onChange={(url) => setFormData({ ...formData, videoUrl: url })}
-                  type="video"
-                  aspectHint="Direct MP4 / WebM video file (Max 100MB HD Video)"
-                />
+                {/* Live In-Editor Embed Preview */}
+                {formData.videoUrl ? (
+                  (() => {
+                    const ytEmbedUrl = getYouTubeEmbedUrl(formData.videoUrl);
+                    const isDirectFile = isDirectVideoFile(formData.videoUrl);
+                    if (ytEmbedUrl) {
+                      return (
+                        <div className="mt-3 p-3.5 bg-gray-50 rounded-xl border border-gray-200 space-y-2.5">
+                          <div className="flex justify-between items-center text-xs">
+                            <span className="font-bold text-gray-800 flex items-center gap-2">
+                              <span className="w-2.5 h-2.5 rounded-full bg-green-500 animate-pulse"></span>
+                              Live In-Website Embed Preview (How customers see on website):
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setFormData({ ...formData, videoUrl: '' })}
+                              className="text-red-600 hover:text-red-700 text-xs font-bold"
+                            >
+                              ✕ Remove Video
+                            </button>
+                          </div>
+                          <div className="relative aspect-video w-full max-w-lg rounded-lg overflow-hidden bg-black shadow-inner">
+                            <iframe
+                              src={ytEmbedUrl}
+                              title="Admin YouTube Preview"
+                              className="w-full h-full"
+                              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                              allowFullScreen
+                            />
+                          </div>
+                          <p className="text-[11px] text-gray-500">
+                            💡 Customers can play this video directly inside the product page without opening YouTube.
+                          </p>
+                        </div>
+                      );
+                    } else if (isDirectFile) {
+                      return (
+                        <div className="mt-3 p-3.5 bg-gray-50 rounded-xl border border-gray-200 space-y-2">
+                          <div className="flex justify-between items-center text-xs">
+                            <span className="font-bold text-gray-800">Direct Video File Preview:</span>
+                            <button
+                              type="button"
+                              onClick={() => setFormData({ ...formData, videoUrl: '' })}
+                              className="text-red-600 hover:text-red-700 text-xs font-bold"
+                            >
+                              ✕ Remove Video
+                            </button>
+                          </div>
+                          <div className="relative aspect-video w-full max-w-lg rounded-lg overflow-hidden bg-black">
+                            <video src={formData.videoUrl} controls className="w-full h-full object-contain" />
+                          </div>
+                        </div>
+                      );
+                    } else {
+                      return (
+                        <div className="mt-2 p-2.5 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
+                          ⚠️ Invalid video link format. Please paste a valid YouTube URL (e.g. <code>https://www.youtube.com/watch?v=...</code> or <code>https://youtu.be/...</code>).
+                        </div>
+                      );
+                    }
+                  })()
+                ) : (
+                  <div className="p-3 bg-gray-50 border border-dashed border-gray-300 rounded-xl text-xs text-gray-500 text-center">
+                    No showcase video linked yet. Paste your YouTube link above to activate in-page customer video demonstration.
+                  </div>
+                )}
               </div>
 
               {/* Section 3: Additional Gallery Mockups */}

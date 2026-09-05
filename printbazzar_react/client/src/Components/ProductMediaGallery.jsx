@@ -8,6 +8,8 @@ import {
   HiOutlineChevronRight,
   HiX,
 } from 'react-icons/hi';
+import { FaYoutube } from 'react-icons/fa';
+import { getYouTubeEmbedUrl, getYouTubeThumbnailUrl, isDirectVideoFile } from '../utils/videoUtils';
 
 export default function ProductMediaGallery({
   productName,
@@ -19,6 +21,7 @@ export default function ProductMediaGallery({
 }) {
   const [activeMediaIndex, setActiveMediaIndex] = useState(0);
   const [isLightboxOpen, setIsLightboxOpen] = useState(false);
+  const [isVideoModalOpen, setIsVideoModalOpen] = useState(false);
   const [zoomLevel, setZoomLevel] = useState(1);
 
   // Consolidate images list
@@ -66,12 +69,13 @@ export default function ProductMediaGallery({
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
+                setIsVideoModalOpen(true);
                 if (onOpenVideoTab) onOpenVideoTab();
               }}
-              className="bg-black/75 hover:bg-black text-white text-xs font-bold px-3 py-1.5 rounded-full backdrop-blur-sm flex items-center gap-1.5 shadow-md transition-all"
+              className="bg-red-600 hover:bg-red-700 text-white text-xs font-extrabold px-3 py-1.5 rounded-full backdrop-blur-sm flex items-center gap-1.5 shadow-md transition-all cursor-pointer"
             >
-              <HiOutlinePlay className="w-4 h-4 text-yellow-400" />
-              <span>Video Demo</span>
+              <HiOutlinePlay className="w-4 h-4 text-white" />
+              <span>Watch Demo Video</span>
             </button>
           )}
 
@@ -115,8 +119,8 @@ export default function ProductMediaGallery({
         )}
       </div>
 
-      {/* 2. Thumbnail Perspective Switcher */}
-      {mediaList.length > 1 && (
+      {/* 2. Thumbnail Perspective Switcher (Including Video Showcase) */}
+      {(mediaList.length > 1 || videoUrl) && (
         <div className="flex flex-wrap gap-2.5">
           {mediaList.map((url, idx) => (
             <button
@@ -132,6 +136,33 @@ export default function ProductMediaGallery({
               <img src={url} alt={`${productName} Angle ${idx + 1}`} className="w-full h-full object-contain" />
             </button>
           ))}
+
+          {/* Video Showcase Thumbnail */}
+          {videoUrl && (
+            <button
+              type="button"
+              onClick={() => {
+                setIsVideoModalOpen(true);
+                if (onOpenVideoTab) onOpenVideoTab();
+              }}
+              className="relative w-16 h-16 sm:w-20 sm:h-20 rounded-xl overflow-hidden transition-all bg-gray-900 border-2 border-red-500 shadow-xs group flex items-center justify-center cursor-pointer hover:scale-105"
+              title="Play Product Showcase Video"
+            >
+              <img
+                src={getYouTubeThumbnailUrl(videoUrl) || currentMediaUrl}
+                alt="Video Showcase Demo"
+                className="w-full h-full object-cover opacity-60 group-hover:opacity-80 transition-opacity"
+              />
+              <div className="absolute inset-0 flex flex-col items-center justify-center text-white">
+                <span className="w-6 h-6 rounded-full bg-red-600 flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
+                  <HiOutlinePlay className="w-3.5 h-3.5 ml-0.5 text-white" />
+                </span>
+                <span className="text-[9px] font-black uppercase tracking-wider mt-0.5 text-white bg-black/70 px-1.5 py-0.5 rounded">
+                  Video
+                </span>
+              </div>
+            </button>
+          )}
         </div>
       )}
 
@@ -187,6 +218,64 @@ export default function ProductMediaGallery({
           </div>
         </div>
       </Modal>
+
+      {/* 5. In-Page High Definition Video Modal */}
+      {videoUrl && (
+        <Modal show={isVideoModalOpen} onClose={() => setIsVideoModalOpen(false)} size="4xl">
+          <div className="relative bg-slate-950 text-white p-4 sm:p-6 rounded-2xl">
+            <div className="flex justify-between items-center pb-3 border-b border-gray-800">
+              <div className="flex items-center gap-2.5">
+                <FaYoutube className="w-6 h-6 text-red-600 flex-shrink-0" />
+                <div>
+                  <h3 className="text-sm sm:text-base font-extrabold text-white leading-tight">
+                    {productName} — Material, Finish & Size Demonstration
+                  </h3>
+                  <p className="text-[11px] text-gray-400 mt-0.5">
+                    High Definition in-website video player • Zero external redirects
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsVideoModalOpen(false)}
+                className="text-gray-400 hover:text-white text-xl font-bold p-1 rounded-lg hover:bg-white/10"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="relative aspect-video w-full my-4 rounded-xl overflow-hidden bg-black shadow-2xl border border-gray-800">
+              {(() => {
+                const ytUrl = getYouTubeEmbedUrl(videoUrl, { autoplay: true });
+                if (ytUrl) {
+                  return (
+                    <iframe
+                      src={ytUrl}
+                      title={`${productName} Video Showcase`}
+                      className="w-full h-full"
+                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                      allowFullScreen
+                    />
+                  );
+                } else {
+                  return (
+                    <video src={videoUrl} autoPlay controls playsInline className="w-full h-full object-contain" />
+                  );
+                }
+              })()}
+            </div>
+
+            <div className="flex flex-wrap justify-between items-center gap-2 pt-2 border-t border-gray-800 text-xs">
+              <span className="text-gray-400 text-[11px]">
+                ✔ Playing directly inside Print Bazzar website without redirecting to YouTube.
+              </span>
+              <Button size="xs" color="light" onClick={() => setIsVideoModalOpen(false)}>
+                Close Video
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
