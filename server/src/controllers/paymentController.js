@@ -479,6 +479,31 @@ export const verifyPayment = async (req, res) => {
     });
   } catch (error) {
     console.error('Payment verification error:', error);
+    // Double-click / concurrency fallback: Check if another concurrent thread already completed verification successfully
+    try {
+      if (req.body?.orderNumber) {
+        const orderCheck = await prisma.order.findUnique({
+          where: { orderNumber: req.body.orderNumber.trim() },
+          include: { payments: true },
+        });
+        if (orderCheck && (orderCheck.paymentStatus === 'CONFIRMED' || orderCheck.payments?.some((p) => p.status === 'SUCCESS'))) {
+          return res.json({
+            success: true,
+            isDuplicateCall: true,
+            message: 'Payment has already been verified and confirmed for this order.',
+            orderNumber: orderCheck.orderNumber,
+            paymentStatus: orderCheck.paymentStatus,
+            orderStatus: orderCheck.orderStatus,
+            amountPaid: orderCheck.grandTotal,
+            balanceDue: 0,
+            transactionReference: req.body.paymentId || req.body.transactionReference || 'SUCCESS',
+          });
+        }
+      }
+    } catch (fallbackErr) {
+      console.error('Fallback check error:', fallbackErr);
+    }
+
     return res.status(500).json({
       success: false,
       message: 'Failed to process payment verification.',
