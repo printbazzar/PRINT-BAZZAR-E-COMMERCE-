@@ -32,8 +32,8 @@ import DeliveryEstimator from '../Components/DeliveryEstimator';
 import RelatedProductsSection from '../Components/RelatedProductsSection';
 import GuideDesign from '../Components/GuideDesign';
 import Feedback from '../Components/Feedback';
-import PaperGsmSelector from '../components/PaperGsmSelector';
-import DynamicQuantityTierPricing from '../components/DynamicQuantityTierPricing';
+import PaperGsmSelector from '../Components/PaperGsmSelector';
+import DynamicQuantityTierPricing from '../Components/DynamicQuantityTierPricing';
 
 export default function ProductDetail() {
   const { slug } = useParams();

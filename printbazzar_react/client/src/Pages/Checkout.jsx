@@ -23,9 +23,16 @@ export default function Checkout() {
   const [submitStatusMessage, setSubmitStatusMessage] = useState('');
   const isSubmittingRef = useRef(false);
 
-  // Dynamic OTP & Authentication Flags from Backend Settings API
-  const isOtpRequired = Boolean(storeSettings?.MOBILE_OTP_REQUIRED);
-  const isOtpEnabled = Boolean(storeSettings?.MOBILE_OTP_ENABLED);
+  // Dynamic OTP & Authentication Flags from Backend Settings API & Frontend Environment Variables
+  const envOtpRequired = typeof import.meta !== 'undefined' && import.meta.env?.VITE_MOBILE_OTP_REQUIRED !== undefined
+    ? import.meta.env.VITE_MOBILE_OTP_REQUIRED === 'true' || import.meta.env.VITE_MOBILE_OTP_REQUIRED === '1'
+    : null;
+  const envOtpEnabled = typeof import.meta !== 'undefined' && import.meta.env?.VITE_MOBILE_OTP_ENABLED !== undefined
+    ? import.meta.env.VITE_MOBILE_OTP_ENABLED === 'true' || import.meta.env.VITE_MOBILE_OTP_ENABLED === '1'
+    : null;
+
+  const isOtpRequired = envOtpRequired !== null ? envOtpRequired : Boolean(storeSettings?.MOBILE_OTP_REQUIRED);
+  const isOtpEnabled = envOtpEnabled !== null ? envOtpEnabled : Boolean(storeSettings?.MOBILE_OTP_ENABLED);
 
   // OTP Verification state (active when isOtpRequired is true)
   const [otpStep, setOtpStep] = useState('IDLE'); // 'IDLE' | 'SENT' | 'VERIFIED'

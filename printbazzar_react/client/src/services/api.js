@@ -359,7 +359,6 @@ export const api = {
   calculatePrice: (data) => request('/products/calculate-price', { method: 'POST', body: data }),
   getBanners: () => request('/banners'),
   getReviews: () => request('/reviews'),
-  getPublicSettings: () => request('/settings/public'),
 
   // Orders
   createOrder: (orderData) => request('/orders', { method: 'POST', body: orderData }),

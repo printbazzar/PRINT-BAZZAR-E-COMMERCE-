@@ -1,0 +1,7 @@
+{
+  "name": "printbazzar-monorepo",
+  "private": true,
+  "scripts": {
+    "build": "cd printbazzar_react/client && npm install && npm run build"
+  }
+}
