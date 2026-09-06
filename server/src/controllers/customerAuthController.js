@@ -12,6 +12,7 @@ import {
   COOKIE_NAMES,
 } from '../config/cookies.js';
 import { toCustomerSafeOrder } from '../utils/projections.js';
+import { getOtpConfig } from '../config/otpConfig.js';
 export { authenticateCustomer } from '../middleware/auth.js';
 
 const prisma = new PrismaClient();
@@ -674,14 +675,33 @@ export const sendCustomerOtp = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Valid 10-digit mobile number is required.' });
     }
 
-    const isProduction = process.env.NODE_ENV === 'production';
-    const smsGatewayConfigured = Boolean(process.env.SMS_GATEWAY_URL);
+    const otpConfig = getOtpConfig();
+    const isProduction = otpConfig.isProd;
 
-    // In production without SMS gateway, fail safely rather than pretending OTP was dispatched
-    if (isProduction && !smsGatewayConfigured) {
-      return res.status(503).json({
+    // Resilient Strategy: If OTP provider is disabled or unavailable
+    if (!otpConfig.enabled || !otpConfig.isAvailable) {
+      if (otpConfig.required) {
+        // Enforce OTP only if explicitly configured as mandatory via MOBILE_OTP_REQUIRED=true
+        return res.status(503).json({
+          success: false,
+          code: 'OTP_SERVICE_UNAVAILABLE',
+          message: 'Mobile OTP verification service is currently unavailable. Please sign in using "Continue with Google" or email.',
+          isOtpRequired: true,
+          guestAllowed: false,
+          alternativeAuth: ['GOOGLE', 'EMAIL'],
+        });
+      }
+
+      // Safe temporary strategy (MOBILE_OTP_REQUIRED=false):
+      // Do NOT permanently block checkout when provider is unconfigured.
+      // Explain that mobile OTP is optional and allow customer to continue with details or Google/Email.
+      return res.json({
         success: false,
-        message: 'Mobile OTP verification service is currently unavailable. Please sign in using "Continue with Google" or email.',
+        code: 'OTP_OPTIONAL',
+        message: 'Mobile OTP verification is currently optional. You may proceed directly to checkout without OTP, or sign in with Google/Email.',
+        isOtpRequired: false,
+        guestAllowed: true,
+        alternativeAuth: ['GOOGLE', 'EMAIL', 'GUEST'],
       });
     }
 
@@ -709,16 +729,16 @@ export const sendCustomerOtp = async (req, res) => {
       });
     }
 
-    // Never print OTPs in production logs
-    if (!isProduction) {
-      console.log(`[AUTH OTP - DEV ONLY] Generated OTP for mobile ${cleanMobile}: ${otpCode}`);
+    // In non-production or simulator mode, log test OTP for automated testing and dev verification
+    if (!isProduction || otpConfig.provider === 'SIMULATOR') {
+      console.log(`[AUTH OTP - TEST MODE] Generated OTP for mobile ${cleanMobile}: ${otpCode}`);
     }
 
     return res.json({
       success: true,
       message: `OTP sent successfully to +91 ${cleanMobile}`,
       mobile: cleanMobile,
-      devOtp: !isProduction ? otpCode : undefined,
+      devOtp: !isProduction || otpConfig.provider === 'SIMULATOR' ? otpCode : undefined,
     });
   } catch (error) {
     console.error('Send OTP error:', error);

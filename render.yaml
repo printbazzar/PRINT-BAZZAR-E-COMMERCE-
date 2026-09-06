@@ -31,3 +31,9 @@ services:
         sync: false
       - key: RAZORPAY_WEBHOOK_SECRET
         sync: false
+      - key: MOBILE_OTP_ENABLED
+        value: "false"
+      - key: MOBILE_OTP_REQUIRED
+        value: "false"
+      - key: OTP_PROVIDER
+        value: "NONE"

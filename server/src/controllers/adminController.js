@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { toAdminOrderDetailsProjection } from '../utils/projections.js';
+import { getOtpConfig } from '../config/otpConfig.js';
 
 const prisma = new PrismaClient();
 
@@ -1068,6 +1069,8 @@ export const getPublicSettings = async (req, res) => {
 
     const bizInfo = formatted.BUSINESS_INFORMATION_SETTINGS || null;
 
+    const otpConfig = getOtpConfig();
+
     const safePublic = {
       STORE_NAME: bizInfo?.brand?.brandName || formatted.STORE_NAME || 'Print Bazzar',
       STORE_EMAIL: bizInfo?.contact?.supportEmail || formatted.STORE_EMAIL || 'printbazzar.online@gmail.com',
@@ -1085,6 +1088,10 @@ export const getPublicSettings = async (req, res) => {
       PAYMENT_GATEWAY_PROVIDER: formatted.PAYMENT_GATEWAY_PROVIDER || (formatted.RAZORPAY_KEY_ID ? 'RAZORPAY' : 'SIMULATOR'),
       RAZORPAY_KEY_ID: formatted.RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID || '',
       DESIGN_SPLIT_PAYMENT: formatted.DESIGN_SPLIT_PAYMENT !== false,
+      MOBILE_OTP_ENABLED: formatted.MOBILE_OTP_ENABLED !== undefined ? formatted.MOBILE_OTP_ENABLED : otpConfig.enabled,
+      MOBILE_OTP_REQUIRED: formatted.MOBILE_OTP_REQUIRED !== undefined ? formatted.MOBILE_OTP_REQUIRED : otpConfig.required,
+      OTP_PROVIDER: formatted.OTP_PROVIDER || otpConfig.provider,
+      GUEST_CHECKOUT_ENABLED: true,
       BUSINESS_INFORMATION_SETTINGS: bizInfo,
       ...formatted,
     };

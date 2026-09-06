@@ -5,6 +5,7 @@ import { toCustomerSafeOrder } from '../utils/projections.js';
 import { sendOrderNotification } from '../services/notificationService.js';
 import { createSession } from '../services/sessionService.js';
 import { setAuthCookies } from '../config/cookies.js';
+import { getOtpConfig } from '../config/otpConfig.js';
 
 const prisma = new PrismaClient();
 
@@ -32,7 +33,19 @@ export const createOrder = async (req, res) => {
       });
     }
 
-    // Customer identification & zero-cost direct capture
+    const otpConfig = getOtpConfig();
+
+    // In production with MOBILE_OTP_REQUIRED=true, mandate verified customer session
+    if (otpConfig.required && !req.customer) {
+      return res.status(401).json({
+        success: false,
+        code: 'OTP_VERIFICATION_REQUIRED',
+        message: 'Mobile OTP verification is required prior to order placement. Please verify your mobile number or sign in.',
+        isOtpRequired: true,
+      });
+    }
+
+    // Customer identification & zero-cost direct capture (Frictionless Guest Checkout when MOBILE_OTP_REQUIRED=false)
     const authenticatedCustomer = req.customer;
     let customerId = authenticatedCustomer?.id || req.body.customerId || null;
     let orderCustomer = null;
