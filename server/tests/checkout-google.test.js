@@ -269,4 +269,43 @@ describe('Print Bazzar: Google Login & Direct Checkout Automated Tests', () => {
     assert.equal(data.success, false);
     assert.ok(data.message, 'Must provide clear error message to user');
   });
+
+  test('5. Order Confirmation & Automated Email Invoice: Verifies invoice HTML generation and non-blocking dispatch', async () => {
+    const { generateInvoiceEmailHtml, sendOrderInvoiceEmail } = await import('../src/services/notificationService.js');
+
+    const mockOrder = {
+      orderNumber: 'PB-ORD-2026-TEST001',
+      customerName: 'Karthik Raja',
+      customerEmail: 'karthik@example.com',
+      customerMobile: '9629098565',
+      grandTotal: 1250,
+      subtotal: 1100,
+      totalTax: 150,
+      shippingCharge: 0,
+      orderStatus: 'Processing',
+      paymentStatus: 'CONFIRMED',
+      items: [
+        {
+          productNameSnapshot: 'Visiting Cards - Premium Velvet 350 GSM',
+          quantity: 1000,
+          totalPriceSnapshot: 1100,
+          designCharge: 150,
+        },
+      ],
+    };
+
+    // 1. Verify HTML invoice generator creates valid, responsive markup
+    const html = generateInvoiceEmailHtml({ order: mockOrder, invoiceNumber: 'PB-INV-2026-TEST001' });
+    assert.ok(html.includes('PRINT BAZZAR'), 'Email must include brand header');
+    assert.ok(html.includes('PB-ORD-2026-TEST001'), 'Email must include order number');
+    assert.ok(html.includes('PB-INV-2026-TEST001'), 'Email must include invoice number');
+    assert.ok(html.includes('₹1250'), 'Email must display grand total');
+    assert.ok(html.includes('/invoice/PB-ORD-2026-TEST001'), 'Email must provide direct tax invoice link');
+
+    // 2. Verify non-blocking email invoice dispatch
+    const result = await sendOrderInvoiceEmail({ order: mockOrder, invoiceNumber: 'PB-INV-2026-TEST001' });
+    assert.equal(result.success, true, 'Email dispatch must succeed or safely fallback');
+    assert.equal(result.customerEmail, 'karthik@example.com');
+  });
 });
+
