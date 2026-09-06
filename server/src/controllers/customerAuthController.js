@@ -674,6 +674,17 @@ export const sendCustomerOtp = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Valid 10-digit mobile number is required.' });
     }
 
+    const isProduction = process.env.NODE_ENV === 'production';
+    const smsGatewayConfigured = Boolean(process.env.SMS_GATEWAY_URL);
+
+    // In production without SMS gateway, fail safely rather than pretending OTP was dispatched
+    if (isProduction && !smsGatewayConfigured) {
+      return res.status(503).json({
+        success: false,
+        message: 'Mobile OTP verification service is currently unavailable. Please sign in using "Continue with Google" or email.',
+      });
+    }
+
     const cleanMobile = String(mobile).trim().replace(/[^0-9]/g, '').slice(-10);
     const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
     const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
@@ -698,13 +709,16 @@ export const sendCustomerOtp = async (req, res) => {
       });
     }
 
-    console.log(`[AUTH OTP] Generated OTP for mobile ${cleanMobile}: ${otpCode}`);
+    // Never print OTPs in production logs
+    if (!isProduction) {
+      console.log(`[AUTH OTP - DEV ONLY] Generated OTP for mobile ${cleanMobile}: ${otpCode}`);
+    }
 
     return res.json({
       success: true,
       message: `OTP sent successfully to +91 ${cleanMobile}`,
       mobile: cleanMobile,
-      devOtp: process.env.NODE_ENV !== 'production' ? otpCode : undefined,
+      devOtp: !isProduction ? otpCode : undefined,
     });
   } catch (error) {
     console.error('Send OTP error:', error);
@@ -737,7 +751,16 @@ export const verifyCustomerOtp = async (req, res) => {
       return res.status(400).json({ success: false, message: 'OTP has expired. Please request a new code.' });
     }
 
-    if (customer.otpCode !== String(otp).trim() && String(otp).trim() !== '123456') {
+    const isProduction = process.env.NODE_ENV === 'production';
+    const inputOtp = String(otp).trim();
+
+    // Strict OTP validation:
+    // In production, MUST match customer.otpCode strictly.
+    // In non-production, allow matching customer.otpCode OR '123456' for development & automated testing.
+    const isRealOtpMatch = Boolean(customer.otpCode && customer.otpCode === inputOtp);
+    const isDevTestBypass = !isProduction && inputOtp === '123456';
+
+    if (!isRealOtpMatch && !isDevTestBypass) {
       return res.status(400).json({ success: false, message: 'Invalid verification OTP code.' });
     }
 
