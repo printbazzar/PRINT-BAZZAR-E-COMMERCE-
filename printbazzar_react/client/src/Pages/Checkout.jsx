@@ -23,6 +23,17 @@ export default function Checkout() {
   const [submitStatusMessage, setSubmitStatusMessage] = useState('');
   const isSubmittingRef = useRef(false);
 
+  // Dynamic OTP & Authentication Flags from Backend Settings API
+  const isOtpRequired = Boolean(storeSettings?.MOBILE_OTP_REQUIRED);
+  const isOtpEnabled = Boolean(storeSettings?.MOBILE_OTP_ENABLED);
+
+  // OTP Verification state (active when isOtpRequired is true)
+  const [otpStep, setOtpStep] = useState('IDLE'); // 'IDLE' | 'SENT' | 'VERIFIED'
+  const [otpCode, setOtpCode] = useState('');
+  const [otpLoading, setOtpLoading] = useState(false);
+  const [otpBannerMsg, setOtpBannerMsg] = useState('');
+  const [otpBannerError, setOtpBannerError] = useState('');
+
   const [formData, setFormData] = useState({
     customerName: customer?.name || '',
     customerMobile: customer?.mobile || '',
@@ -108,17 +119,99 @@ export default function Checkout() {
     }
   };
 
+  const handleSendOtp = async () => {
+    const cleanMobile = formData.customerMobile.replace(/\D/g, '');
+    if (!cleanMobile || cleanMobile.length !== 10) {
+      setOtpBannerError('Please enter a valid 10-digit mobile number first.');
+      return;
+    }
+    setOtpLoading(true);
+    setOtpBannerError('');
+    setOtpBannerMsg('');
+    try {
+      const res = await api.sendCustomerOtp({ mobile: cleanMobile });
+      if (res.success) {
+        setOtpStep('SENT');
+        setOtpBannerMsg(res.message || `OTP code sent to +91 ${cleanMobile}`);
+        if (res.devOtp) {
+          setOtpCode(res.devOtp); // Convenience in development/testing mode
+        }
+      } else if (res.code === 'OTP_OPTIONAL') {
+        setOtpStep('VERIFIED');
+        setOtpBannerMsg(res.message || 'Mobile OTP is optional. You may proceed directly with checkout.');
+      } else {
+        setOtpBannerError(res.message || 'Failed to send verification OTP.');
+      }
+    } catch (err) {
+      setOtpBannerError(err.message || 'Error sending OTP. Please try again.');
+    } finally {
+      setOtpLoading(false);
+    }
+  };
+
+  const handleVerifyOtp = async () => {
+    const cleanMobile = formData.customerMobile.replace(/\D/g, '');
+    if (!otpCode || otpCode.trim().length !== 6) {
+      setOtpBannerError('Please enter the complete 6-digit OTP code.');
+      return;
+    }
+    setOtpLoading(true);
+    setOtpBannerError('');
+    try {
+      const res = await api.verifyCustomerOtp({
+        mobile: cleanMobile,
+        otp: otpCode.trim(),
+        name: formData.customerName,
+      });
+      if (res.success) {
+        setOtpStep('VERIFIED');
+        setOtpBannerMsg('Mobile number verified successfully!');
+        if (res.customer && setCustomerSession) {
+          setCustomerSession(res.customer, res.token);
+        }
+      } else {
+        setOtpBannerError(res.message || 'Invalid verification OTP code.');
+      }
+    } catch (err) {
+      setOtpBannerError(err.message || 'Verification failed. Please check the code.');
+    } finally {
+      setOtpLoading(false);
+    }
+  };
+
   const validateForm = () => {
     const newErrors = {};
-    if (!formData.customerName.trim()) newErrors.customerName = 'Full Name is required.';
-    if (!formData.customerMobile.trim() || formData.customerMobile.length < 10)
+    if (!formData.customerName.trim() || formData.customerName.trim().length < 2) {
+      newErrors.customerName = 'Full Name is required.';
+    }
+
+    const cleanMobile = formData.customerMobile.replace(/\D/g, '');
+    if (!cleanMobile || cleanMobile.length !== 10) {
       newErrors.customerMobile = 'Valid 10-digit mobile number is required.';
-    if (!formData.customerEmail.trim()) newErrors.customerEmail = 'Email is required for order confirmation.';
+    } else if (!/^[6-9]\d{9}$/.test(cleanMobile)) {
+      newErrors.customerMobile = 'Please enter a valid 10-digit mobile number starting with 6, 7, 8, or 9.';
+    }
+
+    // When backend policy mandates OTP, ensure customer is authenticated or verified
+    if (isOtpRequired && !customer && otpStep !== 'VERIFIED') {
+      newErrors.customerMobile = 'Mobile OTP verification is required prior to order placement.';
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!formData.customerEmail.trim()) {
+      newErrors.customerEmail = 'Email is required for order confirmation.';
+    } else if (!emailRegex.test(formData.customerEmail.trim())) {
+      newErrors.customerEmail = 'Please enter a valid email address.';
+    }
 
     if (formData.deliveryMethod === 'COURIER') {
-      if (!formData.street.trim()) newErrors.street = 'Delivery address is required for courier dispatch.';
-      if (!formData.pincode.trim() || formData.pincode.length < 6)
+      if (!formData.street.trim() || formData.street.trim().length < 5) {
+        newErrors.street = 'Delivery address is required for courier dispatch.';
+      }
+      const cleanPincode = formData.pincode.replace(/\D/g, '');
+      if (!cleanPincode || cleanPincode.length !== 6) {
         newErrors.pincode = 'Valid 6-digit postal pincode is required.';
+      }
     }
 
     setErrors(newErrors);
@@ -128,6 +221,11 @@ export default function Checkout() {
   // 1-Click Direct Order Placement
   const handleSubmitOrder = (e) => {
     if (e && e.preventDefault) e.preventDefault();
+    if (isOtpRequired && !customer && otpStep !== 'VERIFIED') {
+      setSubmitError('Mobile OTP verification is required prior to order placement. Please verify your mobile number above.');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
     if (!validateForm()) return;
     executeOrderPlacement();
   };
@@ -284,9 +382,17 @@ export default function Checkout() {
                 <span className="w-6 h-6 bg-yellow-400 text-black text-xs font-extrabold rounded-full flex items-center justify-center">1</span>
                 Contact & Customer Details
               </h2>
-              {customer && (
+              {customer ? (
                 <span className="text-xs bg-green-100 text-green-800 font-bold px-2.5 py-1 rounded-full flex items-center gap-1">
                   <HiCheckCircle className="w-4 h-4 text-green-600" /> Logged In ({customer.name || customer.email || customer.mobile})
+                </span>
+              ) : isOtpRequired ? (
+                <span className="text-xs bg-amber-100 text-amber-900 font-bold px-2.5 py-1 rounded-full flex items-center gap-1">
+                  🔒 Mobile OTP Verification Required
+                </span>
+              ) : (
+                <span className="text-xs bg-green-50 border border-green-200 text-green-800 font-semibold px-2.5 py-1 rounded-full flex items-center gap-1">
+                  <HiCheckCircle className="w-4 h-4 text-green-600" /> Guest Checkout (OTP Optional)
                 </span>
               )}
             </div>
@@ -357,7 +463,90 @@ export default function Checkout() {
                   className="min-h-[44px]"
                 />
                 {errors.customerMobile && <p className="text-xs text-red-500 mt-1">{errors.customerMobile}</p>}
+                {!isOtpRequired && (
+                  <p className="text-[11px] text-gray-500 mt-1 flex items-center gap-1">
+                    <span className="text-green-600 font-bold">✔</span> Mobile verification is optional.
+                  </p>
+                )}
               </div>
+
+              {/* Inline OTP Verification Card (Active only when backend configures MOBILE_OTP_REQUIRED=true) */}
+              {isOtpRequired && !customer && (
+                <div className="sm:col-span-2 p-3.5 bg-amber-50/90 border border-amber-300 rounded-xl space-y-2.5 shadow-2xs">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-amber-950 flex items-center gap-1.5">
+                      <span>🔒</span> Mobile OTP Verification (Required)
+                    </span>
+                    {otpStep === 'SENT' && (
+                      <span className="text-[11px] text-amber-700 font-medium">
+                        OTP code sent to +91 {formData.customerMobile}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-amber-800">
+                    To finalize and secure your print order, please verify your mobile number with a quick 6-digit code.
+                  </p>
+
+                  {otpBannerError && (
+                    <p className="text-xs text-red-600 font-semibold">{otpBannerError}</p>
+                  )}
+                  {otpBannerMsg && (
+                    <p className="text-xs text-green-700 font-semibold">{otpBannerMsg}</p>
+                  )}
+
+                  {otpStep !== 'SENT' && otpStep !== 'VERIFIED' ? (
+                    <div className="flex items-center gap-2 pt-1">
+                      <Button
+                        type="button"
+                        size="xs"
+                        color="warning"
+                        onClick={handleSendOtp}
+                        disabled={otpLoading}
+                        className="bg-yellow-400 hover:bg-yellow-500 text-black font-bold"
+                      >
+                        {otpLoading ? <Spinner size="xs" /> : 'Send Verification OTP ➔'}
+                      </Button>
+                    </div>
+                  ) : otpStep === 'SENT' ? (
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 pt-1">
+                      <TextInput
+                        type="text"
+                        inputMode="numeric"
+                        maxLength={6}
+                        placeholder="6-digit OTP"
+                        value={otpCode}
+                        onChange={(e) => setOtpCode(e.target.value)}
+                        className="w-36 min-h-[38px]"
+                      />
+                      <div className="flex items-center gap-2">
+                        <Button
+                          type="button"
+                          size="xs"
+                          color="dark"
+                          onClick={handleVerifyOtp}
+                          disabled={otpLoading}
+                          className="bg-gray-900 hover:bg-black text-white font-bold"
+                        >
+                          {otpLoading ? <Spinner size="xs" /> : 'Verify Code ➔'}
+                        </Button>
+                        <button
+                          type="button"
+                          onClick={handleSendOtp}
+                          disabled={otpLoading}
+                          className="text-xs text-gray-500 underline hover:text-gray-800 ml-1"
+                        >
+                          Resend Code
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-xs text-green-800 font-bold flex items-center gap-1.5 pt-1">
+                      <HiCheckCircle className="w-4 h-4 text-green-600" />
+                      <span>Mobile Number Verified (+91 {formData.customerMobile})</span>
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div>
                 <Label value="WhatsApp Number (Optional)" />

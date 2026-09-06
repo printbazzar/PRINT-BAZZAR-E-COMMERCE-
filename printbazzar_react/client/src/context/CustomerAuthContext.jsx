@@ -96,6 +96,23 @@ export function CustomerAuthProvider({ children }) {
     setCustomer(null);
   };
 
+  const sendOtp = async (mobile) => {
+    return await api.sendCustomerOtp({ mobile });
+  };
+
+  const verifyOtp = async (mobile, otp, name) => {
+    const res = await api.verifyCustomerOtp({ mobile, otp, name });
+    if (res.success) {
+      if (res.token) {
+        localStorage.setItem('pb_customer_token', res.token);
+        setToken(res.token);
+      }
+      setCustomer(res.customer);
+      return res;
+    }
+    throw new Error(res.message || 'OTP verification failed');
+  };
+
   return (
     <CustomerAuthContext.Provider
       value={{
@@ -106,6 +123,8 @@ export function CustomerAuthProvider({ children }) {
         isCorporate: customer?.accountType === 'B2B_CORPORATE',
         loginCustomer,
         loginWithGoogle,
+        sendOtp,
+        verifyOtp,
         setCustomerSession,
         signupCustomer,
         logoutCustomer,
