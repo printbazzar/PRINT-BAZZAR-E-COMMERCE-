@@ -35,6 +35,12 @@ export const TEMPLATES = {
     smsText: `Print Bazzar: Order #${order.orderNumber} confirmed! Amount: Rs.${order.grandTotal}. Track live: ${FRONTEND_URL}/track-order/${order.orderNumber}`,
   }),
 
+  DESIGN_ORDER_RECEIVED: (order) => ({
+    title: 'Design Order Received',
+    whatsappText: `🎨 *PRINT BAZZAR — Design Request Received!*\n\nHello ${order.customerName},\nYour custom design order *#${order.orderNumber}* has been received! Our in-house design team is reviewing your requirements and preparing digital proofs.\n\n📍 *Live Order Tracking:* ${FRONTEND_URL}/track-order/${order.orderNumber}\n\nPrint Bazzar Design Studio`,
+    smsText: `Print Bazzar: Design order #${order.orderNumber} received. Our design studio is preparing your proof. Track: ${FRONTEND_URL}/track-order/${order.orderNumber}`,
+  }),
+
   PROOF_READY: (order, extra) => ({
     title: 'Digital Proof Ready',
     whatsappText: `🎨 *PRINT BAZZAR — Digital Proof Ready!*\n\nHello ${order.customerName},\nYour digital print proof for order *#${order.orderNumber}* is ready for your review.\n\nPlease inspect and approve your design to start printing:\n${extra?.proofUrl || `${FRONTEND_URL}/track-order/${order.orderNumber}`}\n\nPrint Bazzar Trichy`,

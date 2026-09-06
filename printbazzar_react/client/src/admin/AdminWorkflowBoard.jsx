@@ -124,17 +124,17 @@ export default function AdminWorkflowBoard() {
 
     // Predict sensible next department
     let nextDept = 'PRODUCTION';
-    let nextStatus = 'PRINTING';
+    let nextStatus = 'PRE_PRODUCTION_QC';
 
     if (currentDept === 'DESIGN') {
       nextDept = 'PRODUCTION';
-      nextStatus = 'PRINTING';
+      nextStatus = 'PRE_PRODUCTION_QC';
     } else if (currentDept === 'PRODUCTION') {
       nextDept = 'FINISHING_QC';
       nextStatus = 'FINISHING';
     } else if (currentDept === 'FINISHING_QC') {
       nextDept = 'PACKING';
-      nextStatus = 'PACKED';
+      nextStatus = 'PACKING';
     } else if (currentDept === 'PACKING') {
       nextDept = 'DELIVERY';
       nextStatus = 'OUT_FOR_DELIVERY';
@@ -420,16 +420,32 @@ export default function AdminWorkflowBoard() {
                   size="sm"
                   required
                 >
-                  <option value="DESIGN_IN_PROGRESS">DESIGN_IN_PROGRESS</option>
-                  <option value="ARTWORK_REQUIRED">ARTWORK_REQUIRED</option>
-                  <option value="PRODUCTION_QUEUE">PRODUCTION_QUEUE</option>
-                  <option value="PRINTING">PRINTING</option>
-                  <option value="FINISHING">FINISHING</option>
-                  <option value="QC">QC</option>
-                  <option value="PACKED">PACKED</option>
-                  <option value="READY_FOR_DELIVERY">READY_FOR_DELIVERY</option>
-                  <option value="OUT_FOR_DELIVERY">OUT_FOR_DELIVERY</option>
-                  <option value="DELIVERED">DELIVERED</option>
+                  <optgroup label="1. Design & Prepress Hub">
+                    <option value="ORDER_REVIEW">ORDER_REVIEW (Prepress Review)</option>
+                    <option value="ARTWORK_REVIEW">ARTWORK_REVIEW</option>
+                    <option value="DESIGN_QUEUE">DESIGN_QUEUE (Design Service)</option>
+                    <option value="CUSTOMER_APPROVAL_REQUIRED">CUSTOMER_APPROVAL_REQUIRED</option>
+                    <option value="ARTWORK_APPROVED">ARTWORK_APPROVED</option>
+                  </optgroup>
+                  <optgroup label="2. Press Production">
+                    <option value="PRE_PRODUCTION_QC">PRE_PRODUCTION_QC</option>
+                    <option value="PRODUCTION_QUEUE">PRODUCTION_QUEUE</option>
+                    <option value="PRINTING">PRINTING</option>
+                  </optgroup>
+                  <optgroup label="3. Finishing & Quality Control">
+                    <option value="FINISHING">FINISHING</option>
+                    <option value="QUALITY_CHECK">QUALITY_CHECK</option>
+                  </optgroup>
+                  <optgroup label="4. Packaging Desk">
+                    <option value="PACKING">PACKING</option>
+                    <option value="READY_FOR_DISPATCH">READY_FOR_DISPATCH</option>
+                  </optgroup>
+                  <optgroup label="5. Logistics & Delivery">
+                    <option value="OUT_FOR_DELIVERY">OUT_FOR_DELIVERY</option>
+                  </optgroup>
+                  <optgroup label="6. Completed">
+                    <option value="DELIVERED">DELIVERED</option>
+                  </optgroup>
                 </Select>
               </div>
             </div>

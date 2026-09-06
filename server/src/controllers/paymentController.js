@@ -17,6 +17,13 @@ async function getGatewayConfig() {
             'ENABLE_ONLINE_PAYMENTS',
             'ENABLE_COD',
             'DESIGN_SPLIT_PAYMENT',
+            'RAZORPAY_MODE',
+            'RAZORPAY_TEST_KEY_ID',
+            'RAZORPAY_TEST_KEY_SECRET',
+            'RAZORPAY_TEST_WEBHOOK_SECRET',
+            'RAZORPAY_LIVE_KEY_ID',
+            'RAZORPAY_LIVE_KEY_SECRET',
+            'RAZORPAY_LIVE_WEBHOOK_SECRET',
           ],
         },
       },
@@ -31,8 +38,22 @@ async function getGatewayConfig() {
       }
     });
 
-    const keyId = config.RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID || '';
-    const keySecret = config.RAZORPAY_KEY_SECRET || process.env.RAZORPAY_KEY_SECRET || process.env.PAYMENT_GATEWAY_SECRET || '';
+    // Determine Mode: TEST or LIVE (Defaults safely to TEST; never switches automatically)
+    const mode = (config.RAZORPAY_MODE || process.env.RAZORPAY_MODE || 'TEST').toUpperCase();
+    const isLive = mode === 'LIVE';
+
+    const keyId = isLive
+      ? (config.RAZORPAY_LIVE_KEY_ID || process.env.RAZORPAY_LIVE_KEY_ID || config.RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID || '')
+      : (config.RAZORPAY_TEST_KEY_ID || process.env.RAZORPAY_TEST_KEY_ID || config.RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID || '');
+
+    const keySecret = isLive
+      ? (config.RAZORPAY_LIVE_KEY_SECRET || process.env.RAZORPAY_LIVE_KEY_SECRET || config.RAZORPAY_KEY_SECRET || process.env.RAZORPAY_KEY_SECRET || process.env.PAYMENT_GATEWAY_SECRET || '')
+      : (config.RAZORPAY_TEST_KEY_SECRET || process.env.RAZORPAY_TEST_KEY_SECRET || config.RAZORPAY_KEY_SECRET || process.env.RAZORPAY_KEY_SECRET || process.env.PAYMENT_GATEWAY_SECRET || '');
+
+    const webhookSecret = isLive
+      ? (config.RAZORPAY_LIVE_WEBHOOK_SECRET || process.env.RAZORPAY_LIVE_WEBHOOK_SECRET || process.env.RAZORPAY_WEBHOOK_SECRET || keySecret)
+      : (config.RAZORPAY_TEST_WEBHOOK_SECRET || process.env.RAZORPAY_TEST_WEBHOOK_SECRET || process.env.RAZORPAY_WEBHOOK_SECRET || keySecret);
+
     const provider = config.PAYMENT_GATEWAY_PROVIDER || (keyId ? 'RAZORPAY' : 'SIMULATOR');
     const enableOnline = config.ENABLE_ONLINE_PAYMENTS !== false;
     const enableCod = config.ENABLE_COD !== false;
@@ -41,15 +62,22 @@ async function getGatewayConfig() {
     return {
       keyId,
       keySecret,
+      webhookSecret,
+      mode,
       provider,
       enableOnline,
       enableCod,
       designSplit,
     };
   } catch (err) {
+    const keyId = process.env.RAZORPAY_TEST_KEY_ID || process.env.RAZORPAY_KEY_ID || '';
+    const keySecret = process.env.RAZORPAY_TEST_KEY_SECRET || process.env.RAZORPAY_KEY_SECRET || process.env.PAYMENT_GATEWAY_SECRET || '';
+    const webhookSecret = process.env.RAZORPAY_TEST_WEBHOOK_SECRET || process.env.RAZORPAY_WEBHOOK_SECRET || keySecret;
     return {
-      keyId: process.env.RAZORPAY_KEY_ID || '',
-      keySecret: process.env.RAZORPAY_KEY_SECRET || process.env.PAYMENT_GATEWAY_SECRET || '',
+      keyId,
+      keySecret,
+      webhookSecret,
+      mode: 'TEST',
       provider: 'SIMULATOR',
       enableOnline: true,
       enableCod: true,
@@ -94,7 +122,7 @@ export const createPaymentSession = async (req, res) => {
     let payableAmount = order.grandTotal;
     let effectiveStage = paymentStage;
 
-    if (hasDesign && config.designSplit) {
+    if (hasDesign && config.designSplit && paymentStage !== 'FULL') {
       if (paymentStage === 'DESIGN' || (order.paymentStatus === 'PENDING' && designFeeTotal > 0)) {
         effectiveStage = 'DESIGN';
         payableAmount = designFeeTotal > 0 ? designFeeTotal : order.grandTotal;
@@ -256,13 +284,13 @@ export const verifyPayment = async (req, res) => {
 
     // Determine whether this is Stage 1 (Design Service) or Stage 2 / Full Printing
     const isStage1 =
-      (hasDesign && config.designSplit && order.paymentStatus === 'PENDING') ||
-      paymentStage === 'DESIGN';
+      paymentStage === 'DESIGN' ||
+      (hasDesign && config.designSplit && order.paymentStatus === 'PENDING' && paymentStage !== 'FULL');
 
     let targetPaymentStatus = 'CONFIRMED';
-    let targetOrderStatus = 'PRODUCTION_QUEUE';
-    let targetDept = 'PRODUCTION';
-    let staffName = 'Press Supervisor';
+    let targetOrderStatus = 'ORDER_REVIEW';
+    let targetDept = 'DESIGN';
+    let staffName = 'Prepress Specialist';
     let amountPaidThisStage = order.grandTotal;
     let newTotalPaid = order.grandTotal;
     let newBalanceDue = 0;
@@ -277,18 +305,24 @@ export const verifyPayment = async (req, res) => {
       newTotalPaid = designFeeTotal;
       newBalanceDue = Math.max(0, order.grandTotal - designFeeTotal);
       historyNote = `Stage 1 Design Fee of ₹${amountPaidThisStage} verified successfully (${paymentMethod} Ref: ${effectiveTxnRef}). Order dispatched to Prepress Design Team. Remaining balance ₹${newBalanceDue} due upon proof approval.`;
-    } else {
-      // Stage 2 Balance Payment or Regular Full Payment
+    } else if (hasDesign) {
+      // Custom Design Required: Move to DESIGN_QUEUE
       targetPaymentStatus = 'CONFIRMED';
-      targetOrderStatus = 'PRODUCTION_QUEUE';
-      targetDept = 'PRODUCTION';
-      staffName = 'Press Supervisor';
+      targetOrderStatus = 'DESIGN_QUEUE';
+      targetDept = 'DESIGN';
+      staffName = 'Design Team Lead';
       newTotalPaid = order.grandTotal;
       newBalanceDue = 0;
-      historyNote =
-        order.paymentStatus === 'PARTIALLY_PAID'
-          ? `Stage 2 Printing Balance payment of ₹${order.invoices?.[0]?.balanceDue || (order.grandTotal - designFeeTotal)} verified (${paymentMethod} Ref: ${effectiveTxnRef}). Digital proof confirmed. Order released to Press Production queue!`
-          : `Full payment of ₹${order.grandTotal} verified successfully (${paymentMethod} Ref: ${effectiveTxnRef}). Order released to Press Production queue.`;
+      historyNote = `Full payment of ₹${order.grandTotal} verified successfully (${paymentMethod} Ref: ${effectiveTxnRef}). Order routed to Design Team (DESIGN_QUEUE) for custom artwork creation.`;
+    } else {
+      // Customer Uploaded Artwork / Print-Ready File: Move to ORDER_REVIEW (Prepress Hub)
+      targetPaymentStatus = 'CONFIRMED';
+      targetOrderStatus = 'ORDER_REVIEW';
+      targetDept = 'DESIGN';
+      staffName = 'Prepress Specialist';
+      newTotalPaid = order.grandTotal;
+      newBalanceDue = 0;
+      historyNote = `Full payment of ₹${order.grandTotal} verified successfully (${paymentMethod} Ref: ${effectiveTxnRef}). Order routed to Prepress Team for Artwork Review (ORDER_REVIEW). Prepress inspection required before production release.`;
     }
 
     // Atomic Database Transaction for Order State Transition
@@ -301,12 +335,20 @@ export const verifyPayment = async (req, res) => {
           orderStatus: targetOrderStatus,
           currentDepartment: targetDept,
           assignedStaffName: staffName,
-          proofStatus: isStage1 ? 'PENDING' : 'APPROVED',
-          proofApprovedAt: isStage1 ? null : new Date(),
+          proofStatus: isStage1 ? 'PENDING' : (hasDesign ? 'PENDING' : 'WAITING_APPROVAL'),
+          proofApprovedAt: null,
         },
       });
 
-      // 2. Create or Update Payment Record
+      // 2. Create or Update Payment Record (Double-click & concurrent idempotency check inside transaction)
+      const existingSuccessPayment = await tx.payment.findFirst({
+        where: {
+          orderId: order.id,
+          transactionId: effectiveTxnRef,
+          status: 'SUCCESS',
+        },
+      });
+
       const paymentMetadata = JSON.stringify({
         verifiedAt: new Date().toISOString(),
         paymentId,
@@ -315,16 +357,18 @@ export const verifyPayment = async (req, res) => {
         signatureVerified: Boolean(config.keySecret && signature),
       });
 
-      await tx.payment.create({
-        data: {
-          orderId: order.id,
-          amount: amountPaidThisStage,
-          status: 'SUCCESS',
-          paymentMethod,
-          transactionId: effectiveTxnRef,
-          paymentMetadata,
-        },
-      });
+      if (!existingSuccessPayment) {
+        await tx.payment.create({
+          data: {
+            orderId: order.id,
+            amount: amountPaidThisStage,
+            status: 'SUCCESS',
+            paymentMethod,
+            transactionId: effectiveTxnRef,
+            paymentMetadata,
+          },
+        });
+      }
 
       // 3. Record in Order Status History
       await tx.orderStatusHistory.create({
@@ -333,16 +377,16 @@ export const verifyPayment = async (req, res) => {
           previousStatus: order.orderStatus,
           newStatus: targetOrderStatus,
           note: historyNote,
-          customerNote: isStage1
-            ? 'Design service fee confirmed. Our design team has started working on your custom artwork.'
-            : 'Payment confirmed successfully! Your order has been scheduled for printing.',
+          customerNote: hasDesign
+            ? 'Payment confirmed successfully! Our design team is reviewing your requirements and preparing your custom artwork.'
+            : 'Payment confirmed successfully! Our prepress team is verifying your uploaded artwork specifications for print readiness.',
           changedByUserId: null,
         },
       });
 
-      // 4. Update Linked Production Jobs
+      // 4. Update Linked Production Jobs (Held in prepress review, NOT released directly to printing press)
       for (const job of order.productionJobs) {
-        if (isStage1) {
+        if (isStage1 || hasDesign) {
           await tx.productionJob.update({
             where: { id: job.id },
             data: {
@@ -354,8 +398,8 @@ export const verifyPayment = async (req, res) => {
           await tx.productionJob.update({
             where: { id: job.id },
             data: {
-              status: 'QUEUED',
-              artworkStatus: 'APPROVED',
+              status: 'ARTWORK_REVIEW',
+              artworkStatus: 'WAITING_APPROVAL',
             },
           });
         }
@@ -607,8 +651,28 @@ export const handlePaymentWebhook = async (req, res) => {
 
       if (alreadyCaptured || (order.paymentStatus === 'CONFIRMED' && order.payments?.some((p) => p.status === 'SUCCESS'))) {
         console.log(`[WEBHOOK IDEMPOTENT] Order ${order.orderNumber} already confirmed or payment ${paymentId} already captured. Skipping duplicate.`);
+        await prisma.auditLog.create({
+          data: {
+            action: 'PAYMENT_WEBHOOK_DUPLICATE_IGNORED',
+            entityName: 'ORDER',
+            entityId: order.id,
+            newValues: JSON.stringify({ orderNumber: order.orderNumber, paymentId, event }),
+          },
+        }).catch(() => {});
         return res.json({ status: 'ok', received: true, isDuplicate: true });
       }
+
+      const hasDesignRequest = order.items?.some((i) => i.designRequired);
+      const targetOrderStatus = hasDesignRequest ? 'DESIGN_QUEUE' : 'ORDER_REVIEW';
+      const targetDept = 'DESIGN';
+      const assignedStaffName = hasDesignRequest ? 'Design Team Lead' : 'Prepress Specialist';
+      const jobStatus = hasDesignRequest ? 'WAITING_FOR_DESIGN_APPROVAL' : 'ARTWORK_REVIEW';
+      const historyNote = hasDesignRequest
+        ? `Payment of ₹${amountPaid} verified asynchronously via Webhook (${paymentId}). Order routed to Design Team (DESIGN_QUEUE) for custom artwork creation.`
+        : `Payment of ₹${amountPaid} verified asynchronously via Webhook (${paymentId}). Order routed to Prepress Team for Artwork Review (ORDER_REVIEW). Prepress inspection required before production release.`;
+      const customerNote = hasDesignRequest
+        ? 'Your payment was successfully verified. Our design team has received your brief and is preparing your artwork!'
+        : 'Your payment was successfully verified. Our prepress team is verifying your uploaded artwork specifications for print readiness.';
 
       // 4. Atomic Multi-Entity State Reconciliation
       await prisma.$transaction(async (tx) => {
@@ -616,11 +680,11 @@ export const handlePaymentWebhook = async (req, res) => {
           where: { id: order.id },
           data: {
             paymentStatus: 'CONFIRMED',
-            orderStatus: 'PRODUCTION_QUEUE',
-            currentDepartment: 'PRODUCTION',
-            assignedStaffName: 'Press Supervisor',
-            proofStatus: 'APPROVED',
-            proofApprovedAt: new Date(),
+            orderStatus: targetOrderStatus,
+            currentDepartment: targetDept,
+            assignedStaffName: assignedStaffName,
+            proofStatus: hasDesignRequest ? 'PENDING' : 'WAITING_APPROVAL',
+            proofApprovedAt: null,
           },
         });
 
@@ -644,9 +708,9 @@ export const handlePaymentWebhook = async (req, res) => {
           data: {
             orderId: order.id,
             previousStatus: order.orderStatus,
-            newStatus: 'PRODUCTION_QUEUE',
-            note: `Payment of ₹${amountPaid} verified asynchronously via Webhook (${paymentId}). Released to Press Production.`,
-            customerNote: 'Your payment was successfully verified. Your order is confirmed and queued for printing!',
+            newStatus: targetOrderStatus,
+            note: historyNote,
+            customerNote: customerNote,
             changedByUserId: null,
           },
         });
@@ -654,7 +718,7 @@ export const handlePaymentWebhook = async (req, res) => {
         for (const job of order.productionJobs) {
           await tx.productionJob.update({
             where: { id: job.id },
-            data: { status: 'QUEUED', artworkStatus: 'APPROVED' },
+            data: { status: jobStatus, artworkStatus: 'WAITING_APPROVAL' },
           });
         }
 
@@ -678,23 +742,56 @@ export const handlePaymentWebhook = async (req, res) => {
               amountPaid,
               paymentId,
               event,
+              newStatus: targetOrderStatus,
             }),
           },
         });
       });
 
-      console.log(`[WEBHOOK SUCCESS] Order ${order.orderNumber} successfully confirmed via webhook event (${event})`);
+      console.log(`[WEBHOOK SUCCESS] Order ${order.orderNumber} successfully confirmed via webhook event (${event}) and moved to ${targetOrderStatus}`);
 
       // Trigger customer notification safely in background
       sendOrderNotification({
-        order: { ...order, orderStatus: 'PRODUCTION_QUEUE', paymentStatus: 'CONFIRMED' },
+        order: { ...order, orderStatus: targetOrderStatus, paymentStatus: 'CONFIRMED' },
         eventType: 'ORDER_CONFIRMED',
       }).catch((err) => console.error('[WEBHOOK NOTIFICATION FAILED]', err.message));
 
       return res.json({ status: 'ok', received: true, orderNumber: order.orderNumber, paymentId });
     }
 
-    // 5. Handle Payment Failed Events (payment.failed)
+    // 5. Handle Payment Authorized Events (payment.authorized)
+    if (event === 'payment.authorized') {
+      const paymentEntity = payload?.payment?.entity || {};
+      const orderNumber =
+        paymentEntity.notes?.orderNumber ||
+        paymentEntity.notes?.order_number;
+
+      if (orderNumber) {
+        const order = await prisma.order.findUnique({
+          where: { orderNumber: String(orderNumber).trim() },
+        });
+
+        if (order) {
+          const paymentId = paymentEntity.id || `auth_${Date.now()}`;
+          await prisma.auditLog.create({
+            data: {
+              action: 'PAYMENT_WEBHOOK_AUTHORIZED',
+              entityName: 'ORDER',
+              entityId: order.id,
+              newValues: JSON.stringify({
+                orderNumber: order.orderNumber,
+                paymentId,
+                amount: paymentEntity.amount ? paymentEntity.amount / 100 : order.grandTotal,
+                event,
+              }),
+            },
+          }).catch(() => {});
+        }
+      }
+      return res.json({ status: 'ok', received: true, event: 'payment.authorized' });
+    }
+
+    // 6. Handle Payment Failed Events (payment.failed)
     if (event === 'payment.failed') {
       const paymentEntity = payload?.payment?.entity || {};
       const orderNumber = paymentEntity.notes?.orderNumber;
@@ -735,6 +832,20 @@ export const handlePaymentWebhook = async (req, res) => {
               customerNote: 'Online payment attempt was declined. You can retry payment or choose Cash on Delivery.',
             },
           });
+
+          await prisma.auditLog.create({
+            data: {
+              action: 'PAYMENT_WEBHOOK_FAILED',
+              entityName: 'ORDER',
+              entityId: order.id,
+              newValues: JSON.stringify({
+                orderNumber: order.orderNumber,
+                paymentId,
+                error: paymentEntity.error_code,
+                description: errDesc,
+              }),
+            },
+          }).catch(() => {});
         }
       }
       return res.json({ status: 'ok', received: true, event: 'payment.failed' });

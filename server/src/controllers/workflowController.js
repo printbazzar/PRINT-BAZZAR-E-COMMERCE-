@@ -8,37 +8,55 @@ export const DEPARTMENTS = {
   DESIGN: {
     key: 'DESIGN',
     title: '1. Design & Prepress Hub',
-    description: 'Artwork inspection, bleed validation & WhatsApp digital proofing',
+    description: 'Artwork inspection, bleed validation & customer proofing',
     color: 'purple',
-    statuses: ['ORDER_RECEIVED', 'PROCESSING', 'Processing', 'ARTWORK_REQUIRED', 'DESIGN_IN_PROGRESS', 'DESIGN_REVIEW', 'DESIGN_APPROVED'],
+    statuses: [
+      'ORDER_CREATED',
+      'PAYMENT_PENDING',
+      'PAYMENT_CONFIRMED',
+      'ORDER_REVIEW',
+      'ARTWORK_REVIEW',
+      'DESIGN_QUEUE',
+      'DESIGN_REQUIRED',
+      'ARTWORK_APPROVED',
+      'CUSTOMER_APPROVAL_REQUIRED',
+      'CUSTOMER_APPROVAL',
+      'ORDER_RECEIVED',
+      'PROCESSING',
+      'Processing',
+      'ARTWORK_REQUIRED',
+      'DESIGN_IN_PROGRESS',
+      'DESIGN_REVIEW',
+      'DESIGN_APPROVED',
+    ],
   },
   PRODUCTION: {
     key: 'PRODUCTION',
     title: '2. Print Room & Production',
-    description: 'Offset / Digital press machine printing & plate setup',
+    description: 'Pre-production QC, press queue & machine printing',
     color: 'yellow',
-    statuses: ['PRODUCTION_QUEUE', 'PRINTING', 'PROCESSING', 'Processing'],
+    statuses: ['PRE_PRODUCTION_QC', 'PRODUCTION_QUEUE', 'PRINTING'],
   },
   FINISHING_QC: {
     key: 'FINISHING_QC',
     title: '3. Finishing & Quality Control',
-    description: 'Lamination, die-cutting, folding & quality inspection pass',
+    description: 'Lamination, die-cutting, folding & inspection pass',
     color: 'indigo',
-    statuses: ['FINISHING', 'QC'],
+    statuses: ['FINISHING', 'QUALITY_CHECK', 'QC'],
   },
   PACKING: {
     key: 'PACKING',
     title: '4. Packaging & Dispatch Desk',
-    description: 'Box packing, bubble wrapping, weighing & dispatch slip attachment',
+    description: 'Box packing, bubble wrapping, weighing & dispatch preparation',
     color: 'orange',
-    statuses: ['PACKED', 'READY_FOR_DELIVERY'],
+    statuses: ['PACKING', 'PACKED', 'READY', 'READY_FOR_DISPATCH', 'READY_FOR_DELIVERY'],
   },
   DELIVERY: {
     key: 'DELIVERY',
     title: '5. Logistics & Delivery',
     description: 'Trichy local express delivery boy & All-India courier tracking',
     color: 'blue',
-    statuses: ['OUT_FOR_DELIVERY'],
+    statuses: ['DISPATCHED', 'OUT_FOR_DELIVERY'],
   },
   COMPLETED: {
     key: 'COMPLETED',
@@ -87,21 +105,23 @@ export const getWorkflowBoard = async (req, res) => {
     };
 
     orders.forEach((order) => {
-      let dept = order.currentDepartment || 'PRODUCTION';
+      let dept = order.currentDepartment;
       if (!columns[dept]) {
         // Fallback mapping based on status
-        if (['ORDER_RECEIVED', 'PROCESSING', 'Processing', 'ARTWORK_REQUIRED', 'DESIGN_IN_PROGRESS', 'DESIGN_REVIEW', 'DESIGN_APPROVED'].includes(order.orderStatus)) {
-          dept = order.currentDepartment || 'DESIGN';
-        } else if (['PRODUCTION_QUEUE', 'PRINTING'].includes(order.orderStatus)) {
+        if (DEPARTMENTS.DESIGN.statuses.includes(order.orderStatus)) {
+          dept = 'DESIGN';
+        } else if (DEPARTMENTS.PRODUCTION.statuses.includes(order.orderStatus)) {
           dept = 'PRODUCTION';
-        } else if (['FINISHING', 'QC'].includes(order.orderStatus)) {
+        } else if (DEPARTMENTS.FINISHING_QC.statuses.includes(order.orderStatus)) {
           dept = 'FINISHING_QC';
-        } else if (['PACKED', 'READY_FOR_DELIVERY'].includes(order.orderStatus)) {
+        } else if (DEPARTMENTS.PACKING.statuses.includes(order.orderStatus)) {
           dept = 'PACKING';
-        } else if (['OUT_FOR_DELIVERY'].includes(order.orderStatus)) {
+        } else if (DEPARTMENTS.DELIVERY.statuses.includes(order.orderStatus)) {
           dept = 'DELIVERY';
-        } else if (['DELIVERED', 'COMPLETED'].includes(order.orderStatus)) {
+        } else if (DEPARTMENTS.COMPLETED.statuses.includes(order.orderStatus)) {
           dept = 'COMPLETED';
+        } else {
+          dept = 'DESIGN';
         }
       }
 

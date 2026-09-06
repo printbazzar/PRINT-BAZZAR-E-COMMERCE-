@@ -41,18 +41,38 @@ export default function AdminOrders() {
   const getStatusBadgeClass = (status) => {
     switch (status?.toUpperCase()) {
       case 'DELIVERED':
+      case 'COMPLETED':
         return 'bg-green-100 text-green-800';
-      case 'PROCESSING':
-      case 'ORDER_RECEIVED':
-        return 'bg-blue-100 text-blue-800';
-      case 'CONFIRMED':
-        return 'bg-indigo-100 text-indigo-800';
-      case 'PRINTING':
+      case 'PAYMENT_PENDING':
+        return 'bg-amber-100 text-amber-800';
+      case 'PAYMENT_CONFIRMED':
+        return 'bg-emerald-100 text-emerald-800';
+      case 'ORDER_REVIEW':
+      case 'ARTWORK_REVIEW':
+      case 'DESIGN_QUEUE':
+      case 'DESIGN_REQUIRED':
+      case 'CUSTOMER_APPROVAL_REQUIRED':
+      case 'CUSTOMER_APPROVAL':
+        return 'bg-purple-100 text-purple-800';
+      case 'PRE_PRODUCTION_QC':
       case 'PRODUCTION_QUEUE':
+        return 'bg-blue-100 text-blue-800';
+      case 'PRINTING':
       case 'FINISHING':
         return 'bg-yellow-100 text-yellow-800';
+      case 'QUALITY_CHECK':
+      case 'PACKING':
+      case 'PACKED':
+      case 'READY':
+      case 'READY_FOR_DISPATCH':
+        return 'bg-orange-100 text-orange-800';
+      case 'OUT_FOR_DELIVERY':
+      case 'DISPATCHED':
+        return 'bg-cyan-100 text-cyan-800';
       case 'CANCELLED':
         return 'bg-red-100 text-red-800';
+      case 'PROCESSING':
+      case 'ORDER_RECEIVED':
       default:
         return 'bg-gray-100 text-gray-800';
     }
@@ -92,13 +112,20 @@ export default function AdminOrders() {
           size="sm"
         >
           <option value="ALL">All Order Statuses</option>
-          <option value="Processing">Processing</option>
-          <option value="ORDER_RECEIVED">ORDER_RECEIVED</option>
-          <option value="CONFIRMED">CONFIRMED</option>
+          <option value="PAYMENT_PENDING">PAYMENT_PENDING</option>
+          <option value="PAYMENT_CONFIRMED">PAYMENT_CONFIRMED</option>
+          <option value="ORDER_REVIEW">ORDER_REVIEW (Prepress Hub)</option>
+          <option value="DESIGN_QUEUE">DESIGN_QUEUE (Design Service)</option>
+          <option value="ARTWORK_REVIEW">ARTWORK_REVIEW</option>
+          <option value="CUSTOMER_APPROVAL_REQUIRED">CUSTOMER_APPROVAL_REQUIRED</option>
+          <option value="ARTWORK_APPROVED">ARTWORK_APPROVED</option>
+          <option value="PRE_PRODUCTION_QC">PRE_PRODUCTION_QC</option>
           <option value="PRODUCTION_QUEUE">PRODUCTION_QUEUE</option>
           <option value="PRINTING">PRINTING</option>
           <option value="FINISHING">FINISHING</option>
-          <option value="PACKED">PACKED</option>
+          <option value="QUALITY_CHECK">QUALITY_CHECK</option>
+          <option value="PACKING">PACKING</option>
+          <option value="READY_FOR_DISPATCH">READY_FOR_DISPATCH</option>
           <option value="OUT_FOR_DELIVERY">OUT_FOR_DELIVERY</option>
           <option value="DELIVERED">DELIVERED</option>
           <option value="CANCELLED">CANCELLED</option>
@@ -114,8 +141,11 @@ export default function AdminOrders() {
         >
           <option value="ALL">All Payment Statuses</option>
           <option value="PENDING">Payment: PENDING</option>
+          <option value="PROCESSING">Payment: PROCESSING</option>
           <option value="CONFIRMED">Payment: CONFIRMED</option>
+          <option value="SUCCESS">Payment: SUCCESS</option>
           <option value="FAILED">Payment: FAILED</option>
+          <option value="REFUNDED">Payment: REFUNDED</option>
         </Select>
       </div>
 
@@ -188,9 +218,11 @@ export default function AdminOrders() {
                     <td className="p-3">
                       <span
                         className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold ${
-                          ord.paymentStatus === 'CONFIRMED'
-                            ? 'bg-green-50 text-green-700'
-                            : 'bg-yellow-50 text-yellow-700'
+                          ord.paymentStatus === 'CONFIRMED' || ord.paymentStatus === 'SUCCESS' || ord.paymentStatus === 'PAID'
+                            ? 'bg-green-50 text-green-700 border border-green-200'
+                            : ord.paymentStatus === 'FAILED'
+                            ? 'bg-red-50 text-red-700 border border-red-200'
+                            : 'bg-yellow-50 text-yellow-700 border border-yellow-200'
                         }`}
                       >
                         {ord.paymentStatus}

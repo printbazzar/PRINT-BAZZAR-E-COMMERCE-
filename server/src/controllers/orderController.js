@@ -372,25 +372,28 @@ export const createOrder = async (req, res) => {
     const isOfflinePayment = paymentMethod === 'COD' || paymentMethod === 'CASH';
     const isOnlinePayment = !isOfflinePayment;
 
-    // Requirement: Order created in the database with "Processing" status
-    const initialStatus = 'Processing';
-    let initialDepartment = 'PRODUCTION';
-    let initialStatusNote = 'Order received and is now processing.';
-    let initialStaffRole = 'Press Supervisor';
+    // Workflow Phase 2: Online orders start in PAYMENT_PENDING; COD orders start in ORDER_REVIEW or DESIGN_QUEUE
+    let initialStatus = 'PAYMENT_PENDING';
+    let initialDepartment = 'PAYMENT';
+    let initialStatusNote = 'Order created with PAYMENT_PENDING status. Awaiting online payment confirmation from payment gateway.';
+    let initialStaffRole = 'Payment Gateway';
 
     if (isOnlinePayment) {
+      initialStatus = 'PAYMENT_PENDING';
       initialDepartment = 'PAYMENT';
-      initialStatusNote = 'Order created with Processing status. Awaiting online payment confirmation from payment gateway.';
+      initialStatusNote = 'Order created with PAYMENT_PENDING status. Awaiting online payment confirmation from payment gateway.';
       initialStaffRole = 'Payment Gateway';
     } else if (hasDesignRequest) {
+      initialStatus = 'DESIGN_QUEUE';
       initialDepartment = 'DESIGN';
-      initialStatusNote = 'COD/Cash order received with Processing status. Assigned to Prepress Design Team for customer briefing and proof creation.';
+      initialStatusNote = 'COD/Cash order received. Assigned to Prepress Design Team (DESIGN_QUEUE) for customer briefing and proof creation.';
       initialStaffRole = 'Design Team Lead';
     } else {
-      // Print-ready artwork routes directly to Press Production queue
-      initialDepartment = 'PRODUCTION';
-      initialStatusNote = 'COD/Cash order received with Processing status. Logged directly into Press Production queue.';
-      initialStaffRole = 'Press Supervisor';
+      // Print-ready artwork routes to Prepress Team for Artwork Review
+      initialStatus = 'ORDER_REVIEW';
+      initialDepartment = 'DESIGN';
+      initialStatusNote = 'COD/Cash order received. Routed to Prepress Team for Artwork Review (ORDER_REVIEW).';
+      initialStaffRole = 'Prepress Specialist';
     }
 
     // 6. Pre-fetch default design package outside transaction if design is required
@@ -548,7 +551,7 @@ export const createOrder = async (req, res) => {
         // Online payments hold job in WAITING_FOR_PAYMENT until verified
         const prodJobStatus = isOnlinePayment
           ? 'WAITING_FOR_PAYMENT'
-          : (item.designRequired ? 'WAITING_FOR_DESIGN_APPROVAL' : 'QUEUED');
+          : (item.designRequired ? 'WAITING_FOR_DESIGN_APPROVAL' : 'ARTWORK_REVIEW');
 
         const prodJob = await tx.productionJob.create({
           data: {
@@ -564,7 +567,7 @@ export const createOrder = async (req, res) => {
             customizationSnapshotJson: item.optionsSnapshot,
             approvedArtworkUrl: item.artworkFileUrl || null,
             approvedArtworkVersion: item.artworkFileUrl ? 'V1 - Customer File' : null,
-            artworkStatus: item.designRequired ? 'WAITING_APPROVAL' : 'APPROVED',
+            artworkStatus: 'WAITING_APPROVAL',
             deadline: estimatedDispatchDate,
           },
         });

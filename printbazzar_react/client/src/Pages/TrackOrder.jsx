@@ -85,17 +85,46 @@ export default function TrackOrder() {
     const stageOrder = ['RECEIVED', 'DESIGN', 'PRODUCTION', 'FINISHING_QC', 'PACKING', 'DELIVERY', 'COMPLETED'];
     let currentStageIndex = 0;
 
-    if (dept === 'DESIGN' || ['ARTWORK_REQUIRED', 'DESIGN_IN_PROGRESS', 'DESIGN_REVIEW'].includes(status)) {
+    if (
+      dept === 'DESIGN' ||
+      [
+        'ORDER_REVIEW',
+        'ARTWORK_REVIEW',
+        'DESIGN_QUEUE',
+        'DESIGN_REQUIRED',
+        'CUSTOMER_APPROVAL_REQUIRED',
+        'CUSTOMER_APPROVAL',
+        'ARTWORK_APPROVED',
+        'ARTWORK_REQUIRED',
+        'DESIGN_IN_PROGRESS',
+        'DESIGN_REVIEW',
+      ].includes(status)
+    ) {
       currentStageIndex = 1;
-    } else if (dept === 'PRODUCTION' || ['PRODUCTION_QUEUE', 'PRINTING'].includes(status)) {
+    } else if (
+      dept === 'PRODUCTION' ||
+      ['PRE_PRODUCTION_QC', 'PRODUCTION_QUEUE', 'PRINTING'].includes(status)
+    ) {
       currentStageIndex = 2;
-    } else if (dept === 'FINISHING_QC' || ['FINISHING', 'QC'].includes(status)) {
+    } else if (
+      dept === 'FINISHING_QC' ||
+      ['FINISHING', 'QUALITY_CHECK', 'QC'].includes(status)
+    ) {
       currentStageIndex = 3;
-    } else if (dept === 'PACKING' || ['PACKED', 'READY_FOR_DELIVERY'].includes(status)) {
+    } else if (
+      dept === 'PACKING' ||
+      ['PACKING', 'PACKED', 'READY', 'READY_FOR_DISPATCH', 'READY_FOR_DELIVERY'].includes(status)
+    ) {
       currentStageIndex = 4;
-    } else if (dept === 'DELIVERY' || ['OUT_FOR_DELIVERY'].includes(status)) {
+    } else if (
+      dept === 'DELIVERY' ||
+      ['DISPATCHED', 'OUT_FOR_DELIVERY'].includes(status)
+    ) {
       currentStageIndex = 5;
-    } else if (dept === 'COMPLETED' || ['DELIVERED', 'COMPLETED'].includes(status)) {
+    } else if (
+      dept === 'COMPLETED' ||
+      ['DELIVERED', 'COMPLETED'].includes(status)
+    ) {
       currentStageIndex = 6;
     }
 
