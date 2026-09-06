@@ -48,6 +48,7 @@ import {
   createAdminDesignPackage,
   deleteAdminDesignPackage,
   getOptionMasters,
+  seedDefaultOptionMastersEndpoint,
   createOptionMaster,
   updateOptionMaster,
   createOptionMasterValue,
@@ -247,6 +248,7 @@ router.put('/admin/pricing/:id', authenticateAdmin, requirePermission('PRODUCT_E
 
 // Reusable Option Masters CMS
 router.get('/admin/option-masters', authenticateAdmin, getOptionMasters);
+router.post('/admin/option-masters/seed-defaults', authenticateAdmin, requirePermission('PRODUCT_EDIT'), seedDefaultOptionMastersEndpoint);
 router.post('/admin/option-masters', authenticateAdmin, requirePermission('PRODUCT_EDIT'), createOptionMaster);
 router.put('/admin/option-masters/:id', authenticateAdmin, requirePermission('PRODUCT_EDIT'), updateOptionMaster);
 router.post('/admin/option-masters/:masterId/values', authenticateAdmin, requirePermission('PRODUCT_EDIT'), createOptionMasterValue);

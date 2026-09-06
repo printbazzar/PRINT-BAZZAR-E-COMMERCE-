@@ -304,6 +304,39 @@ async function request(endpoint, options = {}, isRetry = false) {
 }
 
 export const api = {
+  // Universal HTTP Helpers (used across Admin Dashboard and dynamic query managers)
+  get: (endpoint, options = {}) => {
+    let url = endpoint;
+    if (options.params) {
+      const filtered = Object.entries(options.params).filter(
+        ([_, v]) => v !== undefined && v !== null && v !== ''
+      );
+      if (filtered.length > 0) {
+        const qs = new URLSearchParams(filtered).toString();
+        url += (url.includes('?') ? '&' : '?') + qs;
+      }
+    }
+    return request(url, { ...options, method: 'GET' }).then((resData) => ({
+      data: resData,
+      success: resData?.success ?? true,
+    }));
+  },
+  post: (endpoint, body, options = {}) =>
+    request(endpoint, { ...options, method: 'POST', body }).then((resData) => ({
+      data: resData,
+      success: resData?.success ?? true,
+    })),
+  put: (endpoint, body, options = {}) =>
+    request(endpoint, { ...options, method: 'PUT', body }).then((resData) => ({
+      data: resData,
+      success: resData?.success ?? true,
+    })),
+  delete: (endpoint, options = {}) =>
+    request(endpoint, { ...options, method: 'DELETE' }).then((resData) => ({
+      data: resData,
+      success: resData?.success ?? true,
+    })),
+
   // Public Catalog
   getCategories: () => request('/categories'),
   getCategoryBySlug: (slug, params = {}) => {
@@ -572,6 +605,7 @@ export const api = {
   // DYNAMIC OPTION MASTERS & PRODUCT PRICING CONFIGURATION (ADMIN)
   // ==========================================
   getOptionMasters: () => request('/admin/option-masters'),
+  seedDefaultOptionMasters: () => request('/admin/option-masters/seed-defaults', { method: 'POST' }),
   createOptionMaster: (data) => request('/admin/option-masters', { method: 'POST', body: data }),
   updateOptionMaster: (id, data) => request(`/admin/option-masters/${id}`, { method: 'PUT', body: data }),
   createOptionMasterValue: (masterId, data) => request(`/admin/option-masters/${masterId}/values`, { method: 'POST', body: data }),

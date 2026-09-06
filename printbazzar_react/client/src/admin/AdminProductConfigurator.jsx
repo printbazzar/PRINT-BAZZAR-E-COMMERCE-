@@ -29,6 +29,11 @@ import {
   HiOutlineCheckCircle,
   HiOutlineExclamationCircle,
   HiOutlineViewList,
+  HiOutlineSparkles,
+  HiOutlineRefresh,
+  HiOutlineSearch,
+  HiOutlineFilter,
+  HiOutlineCalculator,
 } from 'react-icons/hi';
 import { api } from '../services/api';
 
@@ -53,6 +58,13 @@ export default function AdminProductConfigurator() {
   const [compatibilityRules, setCompatibilityRules] = useState([]);
   const [priceVersions, setPriceVersions] = useState([]);
   const [changeReason, setChangeReason] = useState('');
+
+  // Matrix Editor State
+  const [savingMatrix, setSavingMatrix] = useState(false);
+  const [bulkMarkupType, setBulkMarkupType] = useState('PERCENT'); // 'PERCENT' | 'FLAT'
+  const [bulkMarkupValue, setBulkMarkupValue] = useState(10);
+  const [matrixFilter, setMatrixFilter] = useState('');
+  const [matrixQtyFilter, setMatrixQtyFilter] = useState('ALL');
 
   // UI Toast
   const [toastMessage, setToastMessage] = useState('');
@@ -164,6 +176,13 @@ export default function AdminProductConfigurator() {
         quantityType,
         startingPrice: parseFloat(startingPrice) || 0,
         customUnitPrice: customUnitPrice ? parseFloat(customUnitPrice) : null,
+        priceSlabs: priceSlabs.map((s) => ({
+          minQty: parseInt(s.minQty, 10) || 1,
+          maxQty: s.maxQty ? parseInt(s.maxQty, 10) : null,
+          singleSidePrice: parseFloat(s.singleSidePrice) || 0,
+          doubleSidePrice: parseFloat(s.doubleSidePrice) || 0,
+          unitPrice: parseFloat(s.unitPrice) || ((parseFloat(s.singleSidePrice) || 0) / (parseInt(s.minQty, 10) || 1)),
+        })),
         optionMappings: optionMappings.map((m, idx) => ({
           masterId: m.masterId,
           customLabel: m.customLabel,
@@ -198,6 +217,306 @@ export default function AdminProductConfigurator() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleApplyIndustryPreset = (presetType) => {
+    if (!allMasters || allMasters.length === 0) {
+      showToast('No Option Masters available. Please click Seed Defaults or manage masters.', 'error');
+      return;
+    }
+
+    const presetName = presetType === 'BUSINESS_CARDS'
+      ? 'Business Cards'
+      : presetType === 'STICKERS'
+      ? 'Stickers & Labels'
+      : 'Banners & Signages';
+
+    if (!window.confirm(`Apply "${presetName}" industry preset? This will configure standard options and volume pricing tiers for this product.`)) {
+      return;
+    }
+
+    if (presetType === 'BUSINESS_CARDS') {
+      const targetCodes = ['size', 'material', 'printing_side', 'finishing', 'card_addons'];
+      const newMappings = [];
+      targetCodes.forEach((code, idx) => {
+        const master = allMasters.find((m) => m.code === code);
+        if (!master) return;
+        const isAddon = master.isAddon;
+        let defaultVal = '';
+        if (code === 'size') defaultVal = '3.5 × 2 inches (Standard)';
+        else if (code === 'material') defaultVal = '350 GSM Premium Art Card';
+        else if (code === 'printing_side') defaultVal = 'Single Side (Front Only)';
+        else if (code === 'finishing') defaultVal = 'Thermal Matte Lamination';
+        else defaultVal = master.values?.[0]?.label || '';
+
+        newMappings.push({
+          id: `temp_preset_${Date.now()}_${idx}`,
+          productId: id,
+          masterId: master.id,
+          master,
+          customLabel: master.name,
+          isRequired: !isAddon,
+          isAddon,
+          defaultValue: defaultVal,
+          displayOrder: idx + 1,
+          pricingBehavior: isAddon ? 'ADDON_SURCHARGE' : 'MATRIX_DIMENSION',
+          isEnabled: true,
+          valueMappings: (master.values || []).map((val, vIdx) => ({
+            id: `temp_preset_val_${Date.now()}_${vIdx}`,
+            masterValueId: val.id,
+            masterValue: val,
+            customLabel: val.label,
+            priceModifierType: val.defaultModifierType || 'FLAT',
+            priceModifierValue: val.defaultModifierValue || 0,
+            isDefault: val.label === defaultVal,
+            isEnabled: true,
+            displayOrder: vIdx + 1,
+          })),
+        });
+      });
+
+      setOptionMappings(newMappings);
+      setPricingType('TIERED');
+      setStartingPrice(200);
+      setPriceSlabs([
+        { id: `slab_1`, minQty: 100, singleSidePrice: 200, doubleSidePrice: 350, unitPrice: 2.0 },
+        { id: `slab_2`, minQty: 250, singleSidePrice: 380, doubleSidePrice: 650, unitPrice: 1.52 },
+        { id: `slab_3`, minQty: 500, singleSidePrice: 650, doubleSidePrice: 1100, unitPrice: 1.3 },
+        { id: `slab_4`, minQty: 1000, singleSidePrice: 1100, doubleSidePrice: 1800, unitPrice: 1.1 },
+        { id: `slab_5`, minQty: 2000, singleSidePrice: 2000, doubleSidePrice: 3200, unitPrice: 1.0 },
+      ]);
+      showToast('Applied Business Cards industry preset! Click Save Changes to store.');
+    } else if (presetType === 'STICKERS') {
+      const targetCodes = ['size', 'custom_shape', 'material', 'finishing'];
+      const newMappings = [];
+      targetCodes.forEach((code, idx) => {
+        const master = allMasters.find((m) => m.code === code);
+        if (!master) return;
+        const isAddon = master.isAddon;
+        let defaultVal = '';
+        if (code === 'size') defaultVal = '2 × 2 inches';
+        else if (code === 'custom_shape') defaultVal = 'Standard Square / Rectangle Cut';
+        else if (code === 'material') defaultVal = 'Premium Gloss Vinyl Sticker';
+        else if (code === 'finishing') defaultVal = 'Waterproof Scratch-Resistant Film';
+        else defaultVal = master.values?.[0]?.label || '';
+
+        newMappings.push({
+          id: `temp_preset_${Date.now()}_${idx}`,
+          productId: id,
+          masterId: master.id,
+          master,
+          customLabel: master.name,
+          isRequired: !isAddon,
+          isAddon,
+          defaultValue: defaultVal,
+          displayOrder: idx + 1,
+          pricingBehavior: isAddon ? 'ADDON_SURCHARGE' : 'MATRIX_DIMENSION',
+          isEnabled: true,
+          valueMappings: (master.values || []).map((val, vIdx) => ({
+            id: `temp_preset_val_${Date.now()}_${vIdx}`,
+            masterValueId: val.id,
+            masterValue: val,
+            customLabel: val.label,
+            priceModifierType: val.defaultModifierType || 'FLAT',
+            priceModifierValue: val.defaultModifierValue || 0,
+            isDefault: val.label === defaultVal,
+            isEnabled: true,
+            displayOrder: vIdx + 1,
+          })),
+        });
+      });
+
+      setOptionMappings(newMappings);
+      setPricingType('TIERED');
+      setStartingPrice(150);
+      setPriceSlabs([
+        { id: `slab_s1`, minQty: 50, singleSidePrice: 150, doubleSidePrice: 150, unitPrice: 3.0 },
+        { id: `slab_s2`, minQty: 100, singleSidePrice: 250, doubleSidePrice: 250, unitPrice: 2.5 },
+        { id: `slab_s3`, minQty: 250, singleSidePrice: 500, doubleSidePrice: 500, unitPrice: 2.0 },
+        { id: `slab_s4`, minQty: 500, singleSidePrice: 850, doubleSidePrice: 850, unitPrice: 1.7 },
+        { id: `slab_s5`, minQty: 1000, singleSidePrice: 1400, doubleSidePrice: 1400, unitPrice: 1.4 },
+      ]);
+      showToast('Applied Stickers & Labels industry preset! Click Save Changes to store.');
+    } else if (presetType === 'BANNERS') {
+      const targetCodes = ['size', 'material', 'printing_method', 'banner_finishing'];
+      const newMappings = [];
+      targetCodes.forEach((code, idx) => {
+        const master = allMasters.find((m) => m.code === code);
+        if (!master) return;
+        const isAddon = master.isAddon;
+        let defaultVal = '';
+        if (code === 'size') defaultVal = '6 × 3 ft (18 Sq.ft)';
+        else if (code === 'material') defaultVal = 'Standard Frontlit Flex (280 GSM)';
+        else if (code === 'printing_method') defaultVal = 'Eco-Solvent HD Print (1440 DPI)';
+        else if (code === 'banner_finishing') defaultVal = 'Brass Eyelets on All Corners';
+        else defaultVal = master.values?.[0]?.label || '';
+
+        newMappings.push({
+          id: `temp_preset_${Date.now()}_${idx}`,
+          productId: id,
+          masterId: master.id,
+          master,
+          customLabel: master.name,
+          isRequired: !isAddon,
+          isAddon,
+          defaultValue: defaultVal,
+          displayOrder: idx + 1,
+          pricingBehavior: isAddon ? 'ADDON_SURCHARGE' : 'MATRIX_DIMENSION',
+          isEnabled: true,
+          valueMappings: (master.values || []).map((val, vIdx) => ({
+            id: `temp_preset_val_${Date.now()}_${vIdx}`,
+            masterValueId: val.id,
+            masterValue: val,
+            customLabel: val.label,
+            priceModifierType: val.defaultModifierType || 'FLAT',
+            priceModifierValue: val.defaultModifierValue || 0,
+            isDefault: val.label === defaultVal,
+            isEnabled: true,
+            displayOrder: vIdx + 1,
+          })),
+        });
+      });
+
+      setOptionMappings(newMappings);
+      setPricingType('PER_SQFT');
+      setStartingPrice(18);
+      setCustomUnitPrice(18);
+      setPriceSlabs([
+        { id: `slab_b1`, minQty: 1, singleSidePrice: 324, doubleSidePrice: 648, unitPrice: 324 },
+        { id: `slab_b2`, minQty: 5, singleSidePrice: 1500, doubleSidePrice: 3000, unitPrice: 300 },
+        { id: `slab_b3`, minQty: 10, singleSidePrice: 2800, doubleSidePrice: 5600, unitPrice: 280 },
+      ]);
+      showToast('Applied Banners & Signages industry preset! Click Save Changes to store.');
+    }
+  };
+
+  const handleGenerateMatrixPermutations = () => {
+    const coreOptions = optionMappings.filter((m) => !m.isAddon && m.isEnabled !== false);
+    if (coreOptions.length === 0) {
+      showToast('Please add & enable at least one core option master in Tab 1 first.', 'error');
+      return;
+    }
+
+    const dimensions = coreOptions
+      .map((opt) => {
+        const optName = opt.customLabel || opt.master?.name || 'Option';
+        const values = (opt.valueMappings || [])
+          .filter((vm) => vm.isEnabled !== false)
+          .map((vm) => ({
+            label: vm.customLabel || vm.masterValue?.label,
+            priceModifierType: vm.priceModifierType || 'FLAT',
+            priceModifierValue: parseFloat(vm.priceModifierValue) || 0,
+          }));
+        return { name: optName, values };
+      })
+      .filter((d) => d.values.length > 0);
+
+    if (dimensions.length === 0) {
+      showToast('No active option values found to generate combinations.', 'error');
+      return;
+    }
+
+    const targetQuantities = priceSlabs.length > 0
+      ? priceSlabs.map((s) => parseInt(s.minQty, 10)).filter(Boolean)
+      : [100, 250, 500, 1000];
+
+    function cartesian(arr) {
+      return arr.reduce(
+        (acc, curr) => acc.flatMap((c) => curr.values.map((v) => ({ ...c, [curr.name]: v }))),
+        [{}]
+      );
+    }
+
+    const optionPermutations = cartesian(dimensions);
+    const maxCombinations = 500;
+    const truncatedOptionPermutations = optionPermutations.slice(0, Math.floor(maxCombinations / targetQuantities.length));
+
+    const generatedEntries = [];
+    let count = 0;
+
+    for (const qty of targetQuantities) {
+      const matchingSlab = priceSlabs.find((s) => parseInt(s.minQty, 10) === qty);
+      const baseSlabPrice = matchingSlab
+        ? parseFloat(matchingSlab.singleSidePrice) || 200
+        : (parseFloat(startingPrice) || 200) * (qty / 100);
+
+      for (const optCombo of truncatedOptionPermutations) {
+        count++;
+        const optionsJsonObj = {};
+        let totalModifiers = 0;
+        const keyParts = [];
+
+        Object.entries(optCombo).forEach(([optName, valObj]) => {
+          optionsJsonObj[optName] = valObj.label;
+          keyParts.push(valObj.label);
+
+          if (valObj.priceModifierType === 'PERCENT') {
+            totalModifiers += (baseSlabPrice * valObj.priceModifierValue) / 100;
+          } else if (valObj.priceModifierType === 'PER_UNIT') {
+            totalModifiers += valObj.priceModifierValue * qty;
+          } else {
+            totalModifiers += valObj.priceModifierValue;
+          }
+        });
+
+        const calculatedPrice = Math.max(1, Math.round(baseSlabPrice + totalModifiers));
+        const combinationKey = `${keyParts.join(' | ')} (Qty: ${qty})`;
+
+        generatedEntries.push({
+          id: `temp_comb_${Date.now()}_${count}`,
+          combinationKey,
+          optionsJson: JSON.stringify(optionsJsonObj),
+          quantity: qty,
+          price: calculatedPrice,
+          unitPrice: parseFloat((calculatedPrice / qty).toFixed(2)),
+          sku: `${product?.sku || 'PRD'}-${qty}-${count}`,
+          isAvailable: true,
+          displayOrder: count,
+        });
+      }
+    }
+
+    setPricingMatrices(generatedEntries);
+    showToast(`Generated ${generatedEntries.length} combinations! Review and click "Save Pricing Matrix".`);
+  };
+
+  const handleSavePricingMatrix = async () => {
+    setSavingMatrix(true);
+    try {
+      const res = await api.bulkUpdatePricingMatrix(id, pricingMatrices);
+      if (res.success) {
+        showToast(res.message || 'Pricing matrix saved successfully!');
+        fetchConfiguration();
+      }
+    } catch (err) {
+      console.error('Matrix save error:', err);
+      showToast(err.message || 'Failed to save pricing matrix.', 'error');
+    } finally {
+      setSavingMatrix(false);
+    }
+  };
+
+  const handleApplyBulkMarkup = () => {
+    const markupVal = parseFloat(bulkMarkupValue) || 0;
+    if (markupVal === 0) return;
+
+    const updated = pricingMatrices.map((row) => {
+      let newPrice = row.price;
+      if (bulkMarkupType === 'PERCENT') {
+        newPrice = Math.round(row.price * (1 + markupVal / 100));
+      } else {
+        newPrice = Math.round(row.price + markupVal);
+      }
+      newPrice = Math.max(1, newPrice);
+      return {
+        ...row,
+        price: newPrice,
+        unitPrice: parseFloat((newPrice / row.quantity).toFixed(2)),
+      };
+    });
+
+    setPricingMatrices(updated);
+    showToast(`Applied ${bulkMarkupType === 'PERCENT' ? `+${markupVal}%` : `+₹${markupVal}`} markup across all combinations.`);
   };
 
   const handleDuplicateFromTemplate = async () => {
@@ -484,6 +803,42 @@ export default function AdminProductConfigurator() {
                   >
                     {isCloning ? <Spinner size="xs" /> : 'Apply Template'}
                   </Button>
+                </div>
+              </div>
+
+              {/* 1-Click Industry Presets Bar */}
+              <div className="bg-amber-50/80 p-4 rounded-xl border border-amber-200 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                <div>
+                  <h4 className="text-xs font-black uppercase tracking-wider text-amber-950 flex items-center gap-1.5">
+                    <HiOutlineSparkles className="w-4 h-4 text-amber-600" />
+                    1-Click Industry Printing Presets
+                  </h4>
+                  <p className="text-xs text-amber-800 mt-0.5">
+                    Instantly load standard options, industry defaults, and volume pricing matrices for standard product types.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleApplyIndustryPreset('BUSINESS_CARDS')}
+                    className="px-3 py-1.5 rounded-lg text-xs font-black bg-amber-400 hover:bg-amber-500 text-black shadow-xs transition-all flex items-center gap-1"
+                  >
+                    📇 Business Cards
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleApplyIndustryPreset('STICKERS')}
+                    className="px-3 py-1.5 rounded-lg text-xs font-black bg-amber-400 hover:bg-amber-500 text-black shadow-xs transition-all flex items-center gap-1"
+                  >
+                    🏷️ Stickers & Labels
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleApplyIndustryPreset('BANNERS')}
+                    className="px-3 py-1.5 rounded-lg text-xs font-black bg-amber-400 hover:bg-amber-500 text-black shadow-xs transition-all flex items-center gap-1"
+                  >
+                    🚩 Banners & Signages
+                  </button>
                 </div>
               </div>
 
@@ -904,6 +1259,362 @@ export default function AdminProductConfigurator() {
                       ))}
                     </Table.Body>
                   </Table>
+                </div>
+              )}
+
+              {/* MATRIX PRICING VIEW */}
+              {pricingType === 'MATRIX' && (
+                <div className="space-y-4">
+                  {/* Top toolbar */}
+                  <div className="bg-purple-50/70 p-4 rounded-xl border border-purple-200 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <h4 className="text-sm font-black text-purple-950 uppercase tracking-wider flex items-center gap-1.5">
+                          <HiOutlineSparkles className="w-4 h-4 text-purple-600" />
+                          Exact Matrix Combinations ({pricingMatrices.length})
+                        </h4>
+                        <Badge color="purple" size="sm">
+                          {pricingMatrices.filter((m) => m.isAvailable).length} Active
+                        </Badge>
+                      </div>
+                      <p className="text-xs text-purple-700">
+                        Match exact customer selections to custom fixed pricing for each volume tier.
+                      </p>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button
+                        size="xs"
+                        color="purple"
+                        onClick={handleGenerateMatrixPermutations}
+                        className="font-bold flex items-center gap-1"
+                      >
+                        <HiOutlineRefresh className="w-3.5 h-3.5 mr-1" />
+                        Auto-Generate Permutations
+                      </Button>
+
+                      <Button
+                        size="xs"
+                        color="success"
+                        disabled={savingMatrix || pricingMatrices.length === 0}
+                        onClick={handleSavePricingMatrix}
+                        className="font-black flex items-center gap-1 bg-green-600 hover:bg-green-700 text-white"
+                      >
+                        {savingMatrix ? <Spinner size="xs" className="mr-1" /> : <HiSave className="w-3.5 h-3.5 mr-1" />}
+                        Save Matrix ({pricingMatrices.length})
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Bulk Markup & Filtering Bar */}
+                  {pricingMatrices.length > 0 && (
+                    <div className="bg-gray-50 p-3.5 rounded-xl border border-gray-200 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
+                      {/* Bulk Markup Tool */}
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-extrabold text-gray-700 uppercase tracking-wide">Bulk Markup:</span>
+                        <Select
+                          size="sm"
+                          value={bulkMarkupType}
+                          onChange={(e) => setBulkMarkupType(e.target.value)}
+                          className="w-28 text-xs"
+                        >
+                          <option value="PERCENT">% Markup</option>
+                          <option value="FLAT">₹ Flat Add</option>
+                        </Select>
+                        <TextInput
+                          size="sm"
+                          type="number"
+                          value={bulkMarkupValue}
+                          onChange={(e) => setBulkMarkupValue(e.target.value)}
+                          className="w-24 text-xs font-bold"
+                          placeholder="e.g. 10"
+                        />
+                        <Button size="xs" color="gray" onClick={handleApplyBulkMarkup} className="font-bold">
+                          Apply to All
+                        </Button>
+                      </div>
+
+                      {/* Filters */}
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <div className="relative">
+                          <TextInput
+                            size="sm"
+                            icon={HiOutlineSearch}
+                            placeholder="Filter combinations..."
+                            value={matrixFilter}
+                            onChange={(e) => setMatrixFilter(e.target.value)}
+                            className="w-48 text-xs"
+                          />
+                        </div>
+                        <Select
+                          size="sm"
+                          value={matrixQtyFilter}
+                          onChange={(e) => setMatrixQtyFilter(e.target.value)}
+                          className="w-32 text-xs"
+                        >
+                          <option value="ALL">All Quantities</option>
+                          {Array.from(new Set(pricingMatrices.map((m) => m.quantity)))
+                            .sort((a, b) => a - b)
+                            .map((qty) => (
+                              <option key={qty} value={qty}>
+                                Qty: {qty}
+                              </option>
+                            ))}
+                        </Select>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Matrix Combinations Table */}
+                  {pricingMatrices.length === 0 ? (
+                    <div className="p-8 text-center bg-gray-50 rounded-xl border-2 border-dashed border-gray-300 space-y-3">
+                      <HiOutlineSparkles className="w-10 h-10 text-purple-400 mx-auto" />
+                      <div>
+                        <h4 className="font-bold text-sm text-gray-800">No Pricing Matrix Entries Yet</h4>
+                        <p className="text-xs text-gray-500 max-w-md mx-auto mt-1">
+                          Click "Auto-Generate Permutations" above to automatically generate combination rows based on the options enabled in Tab 1, or add manual combinations below.
+                        </p>
+                      </div>
+                      <div className="pt-2 flex justify-center gap-2">
+                        <Button size="sm" color="purple" onClick={handleGenerateMatrixPermutations}>
+                          <HiOutlineRefresh className="w-4 h-4 mr-1.5" />
+                          Auto-Generate from Options
+                        </Button>
+                        <Button
+                          size="sm"
+                          color="light"
+                          onClick={() => {
+                            setPricingMatrices([
+                              ...pricingMatrices,
+                              {
+                                id: `manual_${Date.now()}`,
+                                combinationKey: 'Custom Combination',
+                                optionsJson: JSON.stringify({}),
+                                quantity: 100,
+                                price: 250,
+                                unitPrice: 2.5,
+                                sku: `${product?.sku || 'PRD'}-100`,
+                                isAvailable: true,
+                                displayOrder: pricingMatrices.length + 1,
+                              },
+                            ]);
+                          }}
+                        >
+                          + Add Single Row
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="border rounded-xl overflow-hidden max-h-[550px] overflow-y-auto">
+                      <Table hoverable>
+                        <Table.Head className="sticky top-0 bg-gray-100 z-10">
+                          <Table.HeadCell className="w-12">#</Table.HeadCell>
+                          <Table.HeadCell>Combination / Option Attributes</Table.HeadCell>
+                          <Table.HeadCell className="w-24">Quantity</Table.HeadCell>
+                          <Table.HeadCell className="w-36">Total Price (₹)</Table.HeadCell>
+                          <Table.HeadCell className="w-28">Rate / Pc</Table.HeadCell>
+                          <Table.HeadCell className="w-36">SKU Code</Table.HeadCell>
+                          <Table.HeadCell className="w-24 text-center">Available</Table.HeadCell>
+                          <Table.HeadCell className="w-16 text-right">Delete</Table.HeadCell>
+                        </Table.Head>
+                        <Table.Body className="divide-y">
+                          {pricingMatrices
+                            .filter((row) => {
+                              const matchesText =
+                                !matrixFilter ||
+                                row.combinationKey?.toLowerCase().includes(matrixFilter.toLowerCase()) ||
+                                row.optionsJson?.toLowerCase().includes(matrixFilter.toLowerCase()) ||
+                                row.sku?.toLowerCase().includes(matrixFilter.toLowerCase());
+                              const matchesQty =
+                                matrixQtyFilter === 'ALL' || String(row.quantity) === String(matrixQtyFilter);
+                              return matchesText && matchesQty;
+                            })
+                            .map((row, rIdx) => (
+                              <Table.Row key={row.id || rIdx} className="bg-white hover:bg-purple-50/20">
+                                <Table.Cell className="text-xs text-gray-400 font-mono">{rIdx + 1}</Table.Cell>
+                                <Table.Cell>
+                                  <span className="font-bold text-xs text-gray-900 block">{row.combinationKey}</span>
+                                  <span className="text-[10px] text-gray-500 font-mono truncate max-w-sm block">
+                                    {row.optionsJson}
+                                  </span>
+                                </Table.Cell>
+                                <Table.Cell>
+                                  <TextInput
+                                    size="sm"
+                                    type="number"
+                                    value={row.quantity}
+                                    onChange={(e) => {
+                                      const newQty = parseInt(e.target.value, 10) || 1;
+                                      const copy = [...pricingMatrices];
+                                      copy[rIdx].quantity = newQty;
+                                      copy[rIdx].unitPrice = parseFloat((copy[rIdx].price / newQty).toFixed(2));
+                                      setPricingMatrices(copy);
+                                    }}
+                                    className="w-20 text-xs font-bold"
+                                  />
+                                </Table.Cell>
+                                <Table.Cell>
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-xs font-bold text-gray-400">₹</span>
+                                    <TextInput
+                                      size="sm"
+                                      type="number"
+                                      value={row.price}
+                                      onChange={(e) => {
+                                        const newPrice = parseFloat(e.target.value) || 0;
+                                        const copy = [...pricingMatrices];
+                                        copy[rIdx].price = newPrice;
+                                        copy[rIdx].unitPrice = parseFloat((newPrice / copy[rIdx].quantity).toFixed(2));
+                                        setPricingMatrices(copy);
+                                      }}
+                                      className="w-28 text-xs font-black text-green-700"
+                                    />
+                                  </div>
+                                </Table.Cell>
+                                <Table.Cell className="text-xs font-mono text-gray-600">
+                                  ₹{row.unitPrice || (row.price / row.quantity).toFixed(2)}
+                                </Table.Cell>
+                                <Table.Cell>
+                                  <TextInput
+                                    size="sm"
+                                    value={row.sku || ''}
+                                    onChange={(e) => {
+                                      const copy = [...pricingMatrices];
+                                      copy[rIdx].sku = e.target.value;
+                                      setPricingMatrices(copy);
+                                    }}
+                                    placeholder="SKU"
+                                    className="w-28 text-xs font-mono"
+                                  />
+                                </Table.Cell>
+                                <Table.Cell className="text-center">
+                                  <Checkbox
+                                    checked={row.isAvailable !== false}
+                                    onChange={(e) => {
+                                      const copy = [...pricingMatrices];
+                                      copy[rIdx].isAvailable = e.target.checked;
+                                      setPricingMatrices(copy);
+                                    }}
+                                  />
+                                </Table.Cell>
+                                <Table.Cell className="text-right">
+                                  <button
+                                    type="button"
+                                    onClick={() => setPricingMatrices(pricingMatrices.filter((_, idx) => idx !== rIdx))}
+                                    className="p-1 text-red-500 hover:text-red-700"
+                                  >
+                                    <HiOutlineTrash className="w-4 h-4" />
+                                  </button>
+                                </Table.Cell>
+                              </Table.Row>
+                            ))}
+                        </Table.Body>
+                      </Table>
+                    </div>
+                  )}
+
+                  {pricingMatrices.length > 0 && (
+                    <div className="flex justify-between items-center pt-2">
+                      <Button
+                        size="xs"
+                        color="light"
+                        onClick={() => {
+                          setPricingMatrices([
+                            ...pricingMatrices,
+                            {
+                              id: `manual_${Date.now()}`,
+                              combinationKey: 'Custom Combination',
+                              optionsJson: JSON.stringify({}),
+                              quantity: 100,
+                              price: 250,
+                              unitPrice: 2.5,
+                              sku: `${product?.sku || 'PRD'}-100`,
+                              isAvailable: true,
+                              displayOrder: pricingMatrices.length + 1,
+                            },
+                          ]);
+                        }}
+                      >
+                        + Add Custom Row
+                      </Button>
+
+                      <Button
+                        size="sm"
+                        color="success"
+                        disabled={savingMatrix}
+                        onClick={handleSavePricingMatrix}
+                        className="font-black bg-green-600 hover:bg-green-700 text-white"
+                      >
+                        {savingMatrix ? <Spinner size="sm" className="mr-2" /> : <HiSave className="w-4 h-4 mr-1.5" />}
+                        Save All Matrix Changes
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* PER SQ.FT / FORMULA PRICING VIEW */}
+              {(pricingType === 'PER_SQFT' || pricingType === 'CUSTOM_UNIT') && (
+                <div className="space-y-5">
+                  <div className="bg-purple-50 p-4 rounded-xl border border-purple-200">
+                    <h4 className="text-xs font-black uppercase tracking-wider text-purple-900 flex items-center gap-1.5">
+                      <HiOutlineCalculator className="w-4 h-4 text-purple-700" />
+                      Formula / Linear Dimension Pricing Settings
+                    </h4>
+                    <p className="text-xs text-purple-700 mt-0.5">
+                      Used for large format print products like Flex Banners, Vinyl Stickers, Canvas, Standees, and Acrylic Boards.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl">
+                    <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs space-y-2">
+                      <Label className="text-xs font-black uppercase text-gray-800">
+                        Base Rate per Unit / Sq.ft (₹)
+                      </Label>
+                      <TextInput
+                        size="sm"
+                        type="number"
+                        value={customUnitPrice}
+                        onChange={(e) => setCustomUnitPrice(e.target.value)}
+                        placeholder="e.g. 18"
+                        className="font-bold text-sm"
+                      />
+                      <span className="text-[11px] text-gray-500 block">
+                        Cost per square foot or linear unit for standard printing.
+                      </span>
+                    </div>
+
+                    <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs space-y-2">
+                      <Label className="text-xs font-black uppercase text-gray-800">
+                        Starting / Minimum Price per Order (₹)
+                      </Label>
+                      <TextInput
+                        size="sm"
+                        type="number"
+                        value={startingPrice}
+                        onChange={(e) => setStartingPrice(e.target.value)}
+                        placeholder="e.g. 150"
+                        className="font-bold text-sm"
+                      />
+                      <span className="text-[11px] text-gray-500 block">
+                        Floor price to cover machine setup if customer dimensions are very small.
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Interactive Formula Simulation */}
+                  <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 max-w-2xl space-y-3">
+                    <h5 className="font-extrabold text-xs uppercase tracking-wider text-gray-700">
+                      Live Formula Calculation Preview
+                    </h5>
+                    <div className="bg-white p-3.5 rounded-lg border font-mono text-xs text-gray-700 space-y-1">
+                      <p>Example: 6 ft (Width) × 3 ft (Height) = <span className="font-bold text-purple-700">18 Sq.ft</span></p>
+                      <p>Rate: ₹{customUnitPrice || 18} / sq.ft</p>
+                      <p className="font-bold text-sm text-green-700 pt-1 border-t">
+                        Estimated Base Price = 18 × ₹{customUnitPrice || 18} = ₹{Math.max(parseFloat(startingPrice) || 0, 18 * (parseFloat(customUnitPrice) || 18))}
+                      </p>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>

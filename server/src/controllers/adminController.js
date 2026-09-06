@@ -1445,6 +1445,21 @@ export const getOptionMasters = async (req, res) => {
   }
 };
 
+export const seedDefaultOptionMastersEndpoint = async (req, res) => {
+  try {
+    const { seedComprehensiveOptionMasters } = await import('../scripts/seedComprehensiveOptionMasters.js');
+    const result = await seedComprehensiveOptionMasters();
+    return res.json({
+      success: true,
+      message: `Successfully ensured ${result.totalMasters} Option Masters and ${result.totalValues} Values in database.`,
+      data: result,
+    });
+  } catch (error) {
+    console.error('Error seeding default option masters:', error);
+    return res.status(500).json({ success: false, message: 'Failed to seed default option masters.' });
+  }
+};
+
 export const createOptionMaster = async (req, res) => {
   try {
     const { name, code, description, optionType = 'SELECT', isAddon = false, displayOrder = 0, values = [] } = req.body;
@@ -1648,6 +1663,7 @@ export const updateProductConfiguration = async (req, res) => {
       customUnitPrice,
       startingPrice,
       optionMappings = [],
+      priceSlabs,
       changeReason,
     } = req.body;
 
@@ -1669,6 +1685,29 @@ export const updateProductConfiguration = async (req, res) => {
         startingPrice: startingPrice !== undefined ? parseFloat(startingPrice) : undefined,
       },
     });
+
+    // Update Price Slabs if provided
+    if (priceSlabs && Array.isArray(priceSlabs)) {
+      await prisma.productPriceSlab.deleteMany({ where: { productId: id } });
+      if (priceSlabs.length > 0) {
+        await prisma.productPriceSlab.createMany({
+          data: priceSlabs.map((s, idx) => ({
+            productId: id,
+            minQty: parseInt(s.minQty, 10) || 1,
+            maxQty: s.maxQty ? parseInt(s.maxQty, 10) : null,
+            unitPrice: parseFloat(s.unitPrice) || ((parseFloat(s.singleSidePrice) || 0) / (parseInt(s.minQty, 10) || 1)),
+            singleSidePrice: parseFloat(s.singleSidePrice) || 0,
+            doubleSidePrice: parseFloat(s.doubleSidePrice) || 0,
+            designCharge: parseFloat(s.singleSideDesignCharge || s.designCharge) || 200,
+            singleSideDesignCharge: parseFloat(s.singleSideDesignCharge || s.designCharge) || 200,
+            doubleSideDesignCharge: parseFloat(s.doubleSideDesignCharge || (parseFloat(s.singleSideDesignCharge || s.designCharge) * 2)) || 400,
+            unitName: existingProduct.quantityUnit || 'Pieces',
+            pricingType: pricingType || existingProduct.pricingType || 'TIERED',
+            source: 'ADMIN_CONFIGURATOR',
+          })),
+        });
+      }
+    }
 
     const incomingMasterIds = new Set(optionMappings.map((m) => m.masterId));
 
