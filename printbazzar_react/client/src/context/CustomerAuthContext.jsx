@@ -62,12 +62,8 @@ export function CustomerAuthProvider({ children }) {
     throw new Error(res.message || 'Signup failed');
   };
 
-  const sendOtp = async (mobile) => {
-    return await api.sendCustomerOtp({ mobile });
-  };
-
-  const verifyOtp = async (mobile, otp, name) => {
-    const res = await api.verifyCustomerOtp({ mobile, otp, name });
+  const loginWithGoogle = async (googleData) => {
+    const res = await api.customerGoogleLogin(googleData);
     if (res.success) {
       if (res.token) {
         localStorage.setItem('pb_customer_token', res.token);
@@ -76,7 +72,17 @@ export function CustomerAuthProvider({ children }) {
       setCustomer(res.customer);
       return res;
     }
-    throw new Error(res.message || 'OTP verification failed');
+    throw new Error(res.message || 'Google authentication failed');
+  };
+
+  const setCustomerSession = (customerData, tokenString) => {
+    if (tokenString) {
+      localStorage.setItem('pb_customer_token', tokenString);
+      setToken(tokenString);
+    }
+    if (customerData) {
+      setCustomer(customerData);
+    }
   };
 
   const logoutCustomer = async () => {
@@ -99,9 +105,9 @@ export function CustomerAuthProvider({ children }) {
         isAuthenticated: !!customer,
         isCorporate: customer?.accountType === 'B2B_CORPORATE',
         loginCustomer,
+        loginWithGoogle,
+        setCustomerSession,
         signupCustomer,
-        sendOtp,
-        verifyOtp,
         logoutCustomer,
         refreshProfile: fetchCustomerProfile,
       }}

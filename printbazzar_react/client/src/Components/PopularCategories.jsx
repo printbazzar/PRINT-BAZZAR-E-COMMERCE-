@@ -4,7 +4,7 @@ import { api } from "../services/api";
 import { categories as fallbackCategories } from "../assets/data/categories.js";
 
 export function PopularCategories() {
-  const [categories, setCategories] = useState([]);
+  const [categories, setCategories] = useState(fallbackCategories);
 
   useEffect(() => {
     api

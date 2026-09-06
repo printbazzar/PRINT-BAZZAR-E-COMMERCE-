@@ -10,14 +10,14 @@ export const DEPARTMENTS = {
     title: '1. Design & Prepress Hub',
     description: 'Artwork inspection, bleed validation & WhatsApp digital proofing',
     color: 'purple',
-    statuses: ['ORDER_RECEIVED', 'ARTWORK_REQUIRED', 'DESIGN_IN_PROGRESS', 'DESIGN_REVIEW', 'DESIGN_APPROVED'],
+    statuses: ['ORDER_RECEIVED', 'PROCESSING', 'Processing', 'ARTWORK_REQUIRED', 'DESIGN_IN_PROGRESS', 'DESIGN_REVIEW', 'DESIGN_APPROVED'],
   },
   PRODUCTION: {
     key: 'PRODUCTION',
     title: '2. Print Room & Production',
     description: 'Offset / Digital press machine printing & plate setup',
     color: 'yellow',
-    statuses: ['PRODUCTION_QUEUE', 'PRINTING'],
+    statuses: ['PRODUCTION_QUEUE', 'PRINTING', 'PROCESSING', 'Processing'],
   },
   FINISHING_QC: {
     key: 'FINISHING_QC',
@@ -90,8 +90,8 @@ export const getWorkflowBoard = async (req, res) => {
       let dept = order.currentDepartment || 'PRODUCTION';
       if (!columns[dept]) {
         // Fallback mapping based on status
-        if (['ORDER_RECEIVED', 'ARTWORK_REQUIRED', 'DESIGN_IN_PROGRESS', 'DESIGN_REVIEW', 'DESIGN_APPROVED'].includes(order.orderStatus)) {
-          dept = 'DESIGN';
+        if (['ORDER_RECEIVED', 'PROCESSING', 'Processing', 'ARTWORK_REQUIRED', 'DESIGN_IN_PROGRESS', 'DESIGN_REVIEW', 'DESIGN_APPROVED'].includes(order.orderStatus)) {
+          dept = order.currentDepartment || 'DESIGN';
         } else if (['PRODUCTION_QUEUE', 'PRINTING'].includes(order.orderStatus)) {
           dept = 'PRODUCTION';
         } else if (['FINISHING', 'QC'].includes(order.orderStatus)) {

@@ -2,6 +2,9 @@ import { PrismaClient } from '@prisma/client';
 import { calculatePricing } from '../utils/pricingEngine.js';
 import { getStoredBusinessInfo } from './businessInfoController.js';
 import { toCustomerSafeOrder } from '../utils/projections.js';
+import { sendOrderNotification } from '../services/notificationService.js';
+import { createSession } from '../services/sessionService.js';
+import { setAuthCookies } from '../config/cookies.js';
 
 const prisma = new PrismaClient();
 
@@ -29,62 +32,135 @@ export const createOrder = async (req, res) => {
       });
     }
 
-    // Mandatory Authentication Gate: Customer must be authenticated
+    // Customer identification & zero-cost direct capture
     const authenticatedCustomer = req.customer;
-    let customerId = authenticatedCustomer?.id || req.body.customerId;
+    let customerId = authenticatedCustomer?.id || req.body.customerId || null;
+    let orderCustomer = null;
 
-    if (!authenticatedCustomer && !customerId) {
-      const existingCustomer = await prisma.customer.findFirst({
-        where: { mobile: customerMobile.trim() },
+    if (authenticatedCustomer) {
+      orderCustomer = authenticatedCustomer;
+      customerId = authenticatedCustomer.id;
+    } else if (customerId) {
+      orderCustomer = await prisma.customer.findUnique({ where: { id: customerId } });
+    }
+
+    // If not authenticated or customerId not found, find or create directly from checkout details
+    if (!orderCustomer) {
+      const cleanMobile = customerMobile.trim();
+      const cleanEmail = customerEmail ? customerEmail.trim().toLowerCase() : null;
+
+      // Find by mobile or email
+      orderCustomer = await prisma.customer.findFirst({
+        where: {
+          OR: [
+            ...(cleanMobile ? [{ mobile: cleanMobile }] : []),
+            ...(cleanEmail ? [{ email: cleanEmail }] : []),
+          ],
+        },
       });
-      if (!existingCustomer) {
-        return res.status(401).json({
-          success: false,
-          requireAuth: true,
-          message: 'Please login or verify your mobile number with OTP before placing an order.',
+
+      if (!orderCustomer) {
+        // Direct creation: zero SMS gateway cost, immediate customer capture
+        orderCustomer = await prisma.customer.create({
+          data: {
+            name: customerName.trim(),
+            mobile: cleanMobile,
+            email: cleanEmail || `customer_${cleanMobile}@printbazzar.com`,
+            address: typeof shippingAddress === 'object' && shippingAddress?.street ? shippingAddress.street : (typeof shippingAddress === 'string' ? shippingAddress : null),
+            city: typeof shippingAddress === 'object' && shippingAddress?.city ? shippingAddress.city : null,
+            state: typeof shippingAddress === 'object' && shippingAddress?.state ? shippingAddress.state : 'Tamil Nadu',
+            pincode: typeof shippingAddress === 'object' && shippingAddress?.pincode ? shippingAddress.pincode : null,
+            gstNumber: gstNumber || null,
+          },
         });
+      } else {
+        // Update customer details if missing
+        const updateData = {};
+        if (cleanMobile && !orderCustomer.mobile) updateData.mobile = cleanMobile;
+        if (customerName && !orderCustomer.name) updateData.name = customerName.trim();
+        if (cleanEmail && (!orderCustomer.email || orderCustomer.email.includes('@printbazzar.com'))) updateData.email = cleanEmail;
+        if (typeof shippingAddress === 'object' && shippingAddress?.street && !orderCustomer.address) {
+          updateData.address = shippingAddress.street;
+          updateData.city = shippingAddress.city || orderCustomer.city;
+          updateData.state = shippingAddress.state || orderCustomer.state;
+          updateData.pincode = shippingAddress.pincode || orderCustomer.pincode;
+        }
+        if (Object.keys(updateData).length > 0) {
+          orderCustomer = await prisma.customer.update({
+            where: { id: orderCustomer.id },
+            data: updateData,
+          });
+        }
       }
-      customerId = existingCustomer.id;
+      customerId = orderCustomer.id;
+
+      // Persist address into CustomerAddress table
+      if (typeof shippingAddress === 'object' && shippingAddress?.street) {
+        try {
+          await prisma.customerAddress.create({
+            data: {
+              customerId: orderCustomer.id,
+              recipientName: customerName.trim(),
+              mobile: cleanMobile,
+              street: shippingAddress.street,
+              city: shippingAddress.city || 'Tiruchirappalli',
+              state: shippingAddress.state || 'Tamil Nadu',
+              pincode: shippingAddress.pincode || '620008',
+              isDefault: true,
+            },
+          });
+        } catch (addrErr) {
+          console.warn('CustomerAddress save notice:', addrErr.message);
+        }
+      }
     }
 
     const isStorePickup = deliveryMethod === 'STORE_PICKUP' || deliveryType === 'PICKUP';
     const effectiveDeliveryMethod = isStorePickup ? 'STORE_PICKUP' : 'COURIER';
 
-    // 1. Fetch store settings for GST and shipping
-    const gstSetting = await prisma.storeSetting.findUnique({ where: { key: 'GST_RATE' } });
-    const gstRate = gstSetting ? JSON.parse(gstSetting.value) : 18;
+    // 1. Batch fetch store settings (GST, shipping, design job prefix) in a single query
+    const settingsList = await prisma.storeSetting.findMany({
+      where: {
+        key: { in: ['GST_RATE', 'FREE_SHIPPING_THRESHOLD', 'DEFAULT_SHIPPING_CHARGE', 'DESIGN_JOB_PREFIX'] },
+      },
+    });
+    const settingsMap = new Map(settingsList.map((s) => [s.key, s.value]));
 
-    const shipThresholdSetting = await prisma.storeSetting.findUnique({ where: { key: 'FREE_SHIPPING_THRESHOLD' } });
-    const shippingThreshold = shipThresholdSetting ? JSON.parse(shipThresholdSetting.value) : 1500;
+    const gstRate = settingsMap.has('GST_RATE') ? JSON.parse(settingsMap.get('GST_RATE')) : 18;
+    const shippingThreshold = settingsMap.has('FREE_SHIPPING_THRESHOLD') ? JSON.parse(settingsMap.get('FREE_SHIPPING_THRESHOLD')) : 1500;
+    const defaultShipping = settingsMap.has('DEFAULT_SHIPPING_CHARGE') ? JSON.parse(settingsMap.get('DEFAULT_SHIPPING_CHARGE')) : 80;
+    const designJobPrefix = settingsMap.has('DESIGN_JOB_PREFIX') ? settingsMap.get('DESIGN_JOB_PREFIX').trim() : 'PB-DES';
 
-    const defaultShipSetting = await prisma.storeSetting.findUnique({ where: { key: 'DEFAULT_SHIPPING_CHARGE' } });
-    const defaultShipping = defaultShipSetting ? JSON.parse(defaultShipSetting.value) : 80;
+    // 2. Batch fetch all unique products in a single database roundtrip
+    const productIds = Array.from(new Set(items.map((i) => i.productId)));
+    const productsList = await prisma.product.findMany({
+      where: { id: { in: productIds } },
+      include: {
+        options: { include: { values: true } },
+        optionMappings: {
+          where: { isEnabled: true },
+          include: {
+            master: true,
+            valueMappings: {
+              where: { isEnabled: true },
+              include: { masterValue: true },
+            },
+          },
+        },
+        pricingMatrices: true,
+        priceSlabs: true,
+        compatibilityRules: { where: { isActive: true } },
+        specifications: true,
+      },
+    });
+    const productMap = new Map(productsList.map((p) => [p.id, p]));
 
-    // 2. Fetch and calculate each item snapshot authoritatively
+    // Fetch and calculate each item snapshot authoritatively
     let calculatedSubtotal = 0;
     const validatedItems = [];
 
     for (const item of items) {
-      const product = await prisma.product.findUnique({
-        where: { id: item.productId },
-        include: {
-          options: { include: { values: true } },
-          optionMappings: {
-            where: { isEnabled: true },
-            include: {
-              master: true,
-              valueMappings: {
-                where: { isEnabled: true },
-                include: { masterValue: true },
-              },
-            },
-          },
-          pricingMatrices: true,
-          priceSlabs: true,
-          compatibilityRules: { where: { isActive: true } },
-          specifications: true,
-        },
-      });
+      const product = productMap.get(item.productId);
 
       if (!product) {
         return res.status(400).json({
@@ -160,11 +236,14 @@ export const createOrder = async (req, res) => {
     const sgstAmount = totalTax - cgstAmount;
     const grandTotal = calculatedSubtotal + shippingCharge;
 
-    // 4. Generate unique human-readable Order Number (e.g. PB-ORD-2026-000001)
+    // 4. Generate unique collision-proof human-readable Order, Invoice & Shipment Numbers (0ms, no table lock)
     const currentYear = new Date().getFullYear();
-    const orderCount = await prisma.order.count();
-    const orderSequence = String(orderCount + 1).padStart(6, '0');
+    const nowEpoch = Date.now().toString();
+    const randomSuffix = Math.floor(1000 + Math.random() * 9000);
+    const orderSequence = `${nowEpoch.slice(-6)}${randomSuffix}`;
     const orderNumber = `PB-ORD-${currentYear}-${orderSequence}`;
+    const generatedInvoiceNumber = `PB-INV-${currentYear}-${orderSequence}`;
+    const generatedShipmentNumber = `PB-SHIP-${currentYear}-${orderSequence}`;
 
     // Delivery & Production timeline calculation (Requirements #10, #32)
     const hasDesignRequest = validatedItems.some((i) => i.designRequired);
@@ -182,7 +261,12 @@ export const createOrder = async (req, res) => {
     estimatedDeliveryDate.setDate(estimatedDeliveryDate.getDate() + transitDays);
     if (estimatedDeliveryDate.getDay() === 0) estimatedDeliveryDate.setDate(estimatedDeliveryDate.getDate() + 1);
 
-    // 5. Link to Authenticated Customer Record
+    // 5. Cleanly capture customer contact & delivery address directly into DB
+    const cleanShippingAddr = typeof shippingAddress === 'string'
+      ? (() => { try { return JSON.parse(shippingAddress); } catch (e) { return { street: shippingAddress }; } })()
+      : (shippingAddress || {});
+    const streetText = cleanShippingAddr.street || cleanShippingAddr.fullAddress || (typeof shippingAddress === 'string' ? shippingAddress : '');
+
     let customer = null;
     if (authenticatedCustomer) {
       customer = authenticatedCustomer;
@@ -190,9 +274,15 @@ export const createOrder = async (req, res) => {
       customer = await prisma.customer.findUnique({ where: { id: customerId } });
     }
 
-    if (!customer) {
+    if (!customer && customerMobile) {
       customer = await prisma.customer.findFirst({
         where: { mobile: customerMobile.trim() },
+      });
+    }
+
+    if (!customer && customerEmail) {
+      customer = await prisma.customer.findFirst({
+        where: { email: customerEmail.trim().toLowerCase() },
       });
     }
 
@@ -200,46 +290,105 @@ export const createOrder = async (req, res) => {
       customer = await prisma.customer.create({
         data: {
           name: customerName,
-          email: customerEmail || null,
+          email: customerEmail ? customerEmail.trim().toLowerCase() : null,
           mobile: customerMobile.trim(),
           whatsapp: customerWhatsapp || customerMobile.trim(),
-          address: shippingAddress ? (typeof shippingAddress === 'string' ? shippingAddress : JSON.stringify(shippingAddress)) : null,
-          city: shippingAddress?.city || null,
-          state: shippingAddress?.state || 'Tamil Nadu',
-          pincode: shippingAddress?.pincode || null,
+          address: streetText || null,
+          city: cleanShippingAddr.city || 'Tiruchirappalli',
+          state: cleanShippingAddr.state || 'Tamil Nadu',
+          pincode: cleanShippingAddr.pincode || null,
+          savedAddresses: streetText
+            ? {
+                create: {
+                  label: 'Primary Delivery',
+                  recipientName: customerName,
+                  mobile: customerMobile.trim(),
+                  street: streetText,
+                  city: cleanShippingAddr.city || 'Tiruchirappalli',
+                  state: cleanShippingAddr.state || 'Tamil Nadu',
+                  pincode: cleanShippingAddr.pincode || '620001',
+                  isDefault: true,
+                },
+              }
+            : undefined,
         },
       });
+    } else {
+      // Update existing customer profile with latest details from checkout
+      const updateData = {};
+      if (customerName && (!customer.name || customer.name.startsWith('Customer '))) updateData.name = customerName;
+      if (customerEmail && !customer.email) updateData.email = customerEmail.trim().toLowerCase();
+      if (customerMobile && (!customer.mobile || customer.mobile === '')) updateData.mobile = customerMobile.trim();
+      if (customerWhatsapp && !customer.whatsapp) updateData.whatsapp = customerWhatsapp;
+      if (streetText && !customer.address) updateData.address = streetText;
+      if (cleanShippingAddr.city && !customer.city) updateData.city = cleanShippingAddr.city;
+      if (cleanShippingAddr.state && !customer.state) updateData.state = cleanShippingAddr.state;
+      if (cleanShippingAddr.pincode && !customer.pincode) updateData.pincode = cleanShippingAddr.pincode;
+
+      if (Object.keys(updateData).length > 0) {
+        await prisma.customer.update({
+          where: { id: customer.id },
+          data: updateData,
+        });
+      }
+
+      // Ensure address entry exists in savedAddresses
+      if (streetText) {
+        const existingAddr = await prisma.customerAddress.findFirst({
+          where: { customerId: customer.id, street: streetText },
+        });
+        if (!existingAddr) {
+          await prisma.customerAddress.create({
+            data: {
+              customerId: customer.id,
+              label: 'Delivery Address',
+              recipientName: customerName || customer.name,
+              mobile: customerMobile ? customerMobile.trim() : customer.mobile,
+              street: streetText,
+              city: cleanShippingAddr.city || customer.city || 'Tiruchirappalli',
+              state: cleanShippingAddr.state || customer.state || 'Tamil Nadu',
+              pincode: cleanShippingAddr.pincode || customer.pincode || '620001',
+              isDefault: true,
+            },
+          });
+        }
+      }
     }
 
     // Determine Initial Department & Workflow Status based on payment method and design requirement
     const isOfflinePayment = paymentMethod === 'COD' || paymentMethod === 'CASH';
     const isOnlinePayment = !isOfflinePayment;
 
+    // Requirement: Order created in the database with "Processing" status
+    const initialStatus = 'Processing';
     let initialDepartment = 'PRODUCTION';
-    let initialStatus = 'PRODUCTION_QUEUE';
-    let initialStatusNote = 'Order received and logged into Printing Press queue.';
+    let initialStatusNote = 'Order received and is now processing.';
     let initialStaffRole = 'Press Supervisor';
 
     if (isOnlinePayment) {
       initialDepartment = 'PAYMENT';
-      initialStatus = 'PAYMENT_PENDING';
-      initialStatusNote = 'Order created. Awaiting online payment confirmation from payment gateway.';
+      initialStatusNote = 'Order created with Processing status. Awaiting online payment confirmation from payment gateway.';
       initialStaffRole = 'Payment Gateway';
     } else if (hasDesignRequest) {
       initialDepartment = 'DESIGN';
-      initialStatus = 'DESIGN_IN_PROGRESS';
-      initialStatusNote = 'COD/Cash order received. Assigned to Prepress Design Team for customer briefing and proof creation.';
+      initialStatusNote = 'COD/Cash order received with Processing status. Assigned to Prepress Design Team for customer briefing and proof creation.';
       initialStaffRole = 'Design Team Lead';
     } else {
       // Print-ready artwork routes directly to Press Production queue
       initialDepartment = 'PRODUCTION';
-      initialStatus = 'PRODUCTION_QUEUE';
-      initialStatusNote = 'COD/Cash order received with print-ready artwork. Logged directly into Press Production queue.';
+      initialStatusNote = 'COD/Cash order received with Processing status. Logged directly into Press Production queue.';
       initialStaffRole = 'Press Supervisor';
     }
 
-    // 6. Create Order, items, invoice, shipment, and production/design jobs in an atomic transaction
+    // 6. Pre-fetch default design package outside transaction if design is required
+    let defaultDesignPackage = null;
+    if (hasDesignRequest) {
+      defaultDesignPackage = await prisma.designPackage.findFirst({ where: { isDefault: true } });
+    }
+
+    // Create Order, items, invoice, shipment, and production/design jobs in an atomic write-only transaction
     const bizInfo = await getStoredBusinessInfo();
+
     const {
       newOrder,
       invoiceNumber,
@@ -303,10 +452,7 @@ export const createOrder = async (req, res) => {
         },
       });
 
-      // 7. Auto-Generate Linked Order Receipt / Invoice (Requirement #11, #12, #37)
-      const generatedInvoiceNumber = `PB-INV-${currentYear}-${orderSequence}`;
-      const cleanShippingAddr = typeof shippingAddress === 'string' ? JSON.parse(shippingAddress || '{}') : shippingAddress || {};
-
+      // 7. Auto-Generate Linked Order Receipt / Invoice
       await tx.invoice.create({
         data: {
           invoiceNumber: generatedInvoiceNumber,
@@ -359,8 +505,7 @@ export const createOrder = async (req, res) => {
         },
       });
 
-      // 8. Auto-Generate Linked Shipment Record (Requirement #24, #25, #37)
-      const generatedShipmentNumber = `PB-SHIP-${currentYear}-${orderSequence}`;
+      // 8. Auto-Generate Linked Shipment Record
       await tx.shipment.create({
         data: {
           shipmentNumber: generatedShipmentNumber,
@@ -380,7 +525,7 @@ export const createOrder = async (req, res) => {
         },
       });
 
-      // 9. Auto-Generate Linked Production Job Cards for each order item (Requirement #17, #18, #19, #20)
+      // 9. Auto-Generate Linked Production Job Cards for each order item
       const productionJobsList = [];
       for (let idx = 0; idx < createdOrder.items.length; idx++) {
         const item = createdOrder.items[idx];
@@ -418,22 +563,11 @@ export const createOrder = async (req, res) => {
       const designJobsList = [];
 
       if (designItems.length > 0) {
-        const prefixSetting = await tx.storeSetting.findUnique({ where: { key: 'DESIGN_JOB_PREFIX' } });
-        const jobPrefix = prefixSetting ? prefixSetting.value.trim() : 'PB-DES';
-        const year = new Date().getFullYear();
-
         for (let idx = 0; idx < designItems.length; idx++) {
           const dItem = designItems[idx];
-          const designCount = await tx.designOrder.count();
-          const designJobNumber = `${jobPrefix}-${year}-${String(designCount + 1).padStart(5, '0')}`;
-
-          let packageId = dItem.designPackageId;
-          if (!packageId) {
-            const defaultPkg = await tx.designPackage.findFirst({ where: { isDefault: true } });
-            packageId = defaultPkg ? defaultPkg.id : null;
-          }
-
-          // Online payments hold design job in WAITING_FOR_PAYMENT
+          const designSuffix = designItems.length > 1 ? `-${idx + 1}` : '';
+          const designJobNumber = `${designJobPrefix}-${currentYear}-${orderSequence}${designSuffix}`;
+          const packageId = dItem.designPackageId || (defaultDesignPackage ? defaultDesignPackage.id : null);
           const designJobStatus = isOnlinePayment ? 'WAITING_FOR_PAYMENT' : 'REQUIREMENT_RECEIVED';
 
           const designJob = await tx.designOrder.create({
@@ -470,6 +604,23 @@ export const createOrder = async (req, res) => {
         }
       }
 
+      // 11. Auto-generate Admin Audit Log for live Dashboard Activity Tracking
+      await tx.auditLog.create({
+        data: {
+          action: 'ORDER_PLACED',
+          entityName: 'ORDER',
+          entityId: createdOrder.id,
+          newValues: JSON.stringify({
+            orderNumber: createdOrder.orderNumber,
+            customerName: createdOrder.customerName,
+            customerMobile: createdOrder.customerMobile,
+            grandTotal: createdOrder.grandTotal,
+            orderStatus: initialStatus,
+            paymentMethod,
+          }),
+        },
+      });
+
       return {
         newOrder: createdOrder,
         invoiceNumber: generatedInvoiceNumber,
@@ -478,14 +629,56 @@ export const createOrder = async (req, res) => {
         createdDesignJobs: designJobsList,
       };
     }, {
-      timeout: 30000,
+      timeout: 15000,
     });
 
     const designFeeTotal = validatedItems.reduce((acc, it) => acc + (it.designCharge || 0), 0);
     const initialPayableAmount = isOnlinePayment && hasDesignRequest && designFeeTotal > 0 ? designFeeTotal : grandTotal;
     const balanceDue = isOnlinePayment && hasDesignRequest && designFeeTotal > 0 ? Math.max(0, grandTotal - designFeeTotal) : 0;
 
+    // Send customer and admin notification for placed order
+    sendOrderNotification({
+      order: newOrder,
+      eventType: 'ORDER_PROCESSING',
+      extra: {
+        invoiceNumber,
+        shipmentNumber,
+      },
+    }).catch((err) => console.error('[NOTIFICATION DISPATCH FAILED]', err.message));
+
     const safeOrder = toCustomerSafeOrder(newOrder, { isOwner: true });
+
+    // Automatically issue customer session if this was an unauthenticated guest order
+    let authPayload = null;
+    try {
+      if (!authenticatedCustomer && orderCustomer) {
+        const { accessToken, refreshToken, session } = await createSession({
+          userType: 'CUSTOMER',
+          customerId: orderCustomer.id,
+          ipAddress: req.ip || req.connection.remoteAddress,
+          userAgent: req.headers['user-agent'],
+          payload: {
+            id: orderCustomer.id,
+            email: orderCustomer.email,
+            name: orderCustomer.name,
+            accountType: orderCustomer.accountType || 'B2C_RETAIL',
+            isCustomer: true,
+          },
+        });
+        setAuthCookies(res, { accessToken, refreshToken, userType: 'CUSTOMER' });
+        authPayload = {
+          customerToken: accessToken,
+          customer: {
+            id: orderCustomer.id,
+            name: orderCustomer.name,
+            email: orderCustomer.email,
+            mobile: orderCustomer.mobile,
+          },
+        };
+      }
+    } catch (sessionErr) {
+      console.warn('Guest order auto-session generation skipped:', sessionErr.message);
+    }
 
     return res.status(201).json({
       success: true,
@@ -501,6 +694,7 @@ export const createOrder = async (req, res) => {
       balanceDue,
       invoiceNumber,
       shipmentNumber,
+      ...(authPayload || {}),
     });
   } catch (error) {
     const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;

@@ -63,6 +63,10 @@ export function Slider() {
                     src={banner.desktopImageUrl}
                     className="h-auto w-full object-cover group-hover:scale-[1.015] transition-transform duration-300 rounded-2xl"
                     alt={banner.title || `Banner ${index + 1}`}
+                    fetchpriority={index === 0 ? "high" : index > 1 ? "low" : undefined}
+                    loading={index < 2 ? "eager" : "lazy"}
+                    width={620}
+                    height={220}
                   />
                 </Link>
               </SwiperSlide>
@@ -91,6 +95,10 @@ export function Slider() {
                     src={banner.mobileImageUrl || banner.desktopImageUrl}
                     className="w-full h-44 sm:h-56 object-cover rounded-xl"
                     alt={banner.title || `Banner Mobile ${index + 1}`}
+                    fetchpriority={index === 0 ? "high" : "low"}
+                    loading={index === 0 ? "eager" : "lazy"}
+                    width={360}
+                    height={180}
                   />
                 </Link>
               </SwiperSlide>

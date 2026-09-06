@@ -139,6 +139,9 @@ model Product {
   pricingMatrices      ProductPricingMatrix[]
   compatibilityRules   ProductCompatibilityRule[]
   priceVersions        PriceVersion[]
+
+  @@index([categoryId])
+  @@index([categoryId, status])
 }
 
 model ProductImage {
@@ -395,8 +398,10 @@ model Customer {
   id                   String            @id @default(uuid())
   name                 String
   email                String?           @unique
+  googleId             String?           @unique
+  avatarUrl            String?
   passwordHash         String?
-  mobile               String
+  mobile               String            @default("")
   whatsapp             String?
   accountType          String            @default("B2C_RETAIL") // B2C_RETAIL, B2B_CORPORATE
   companyName          String?
@@ -533,6 +538,11 @@ model Order {
   qualityChecks         QualityCheck[]
   shipments             Shipment[]
   invoices              Invoice[]
+
+  @@index([customerId])
+  @@index([orderStatus])
+  @@index([createdAt(sort: Desc)])
+  @@index([paymentStatus])
 }
 
 model OrderItem {
@@ -566,6 +576,9 @@ model OrderItem {
   configurationSnapshot  String? // JSON string of immutable option configuration & pricing breakdown
   designOrders           DesignOrder[]
   productionJobs         ProductionJob[]
+
+  @@index([orderId])
+  @@index([productId])
 }
 
 model OrderStatusHistory {
@@ -579,6 +592,8 @@ model OrderStatusHistory {
   note            String?
   customerNote    String?
   createdAt       DateTime @default(now())
+
+  @@index([orderId])
 }
 
 model OrderNote {
@@ -590,6 +605,8 @@ model OrderNote {
   noteText       String
   isInternalOnly Boolean  @default(true)
   createdAt      DateTime @default(now())
+
+  @@index([orderId])
 }
 
 model Payment {
@@ -602,6 +619,8 @@ model Payment {
   status          String   @default("PENDING") // PENDING, SUCCESS, FAILED
   paymentMetadata String?  // JSON string
   createdAt       DateTime @default(now())
+
+  @@index([orderId])
 }
 
 model StoreSetting {
@@ -804,6 +823,9 @@ model DesignOrder {
   updatedAt           DateTime         @updatedAt
 
   revisions           DesignRevision[]
+
+  @@index([orderId])
+  @@index([orderItemId])
 }
 
 model DesignRevision {
@@ -851,6 +873,9 @@ model ProductionJob {
   updatedAt                  DateTime       @updatedAt
 
   qualityChecks              QualityCheck[]
+
+  @@index([orderId])
+  @@index([orderItemId])
 }
 
 model QualityCheck {
@@ -867,6 +892,9 @@ model QualityCheck {
   failureNotes      String?
   inspectedAt       DateTime?
   createdAt         DateTime       @default(now())
+
+  @@index([orderId])
+  @@index([productionJobId])
 }
 
 model Shipment {
@@ -902,6 +930,8 @@ model Shipment {
   verifiedCustomerName  String?
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
+
+  @@index([orderId])
 }
 
 model Invoice {
@@ -929,6 +959,8 @@ model Invoice {
   transactionReference  String?
   invoiceDate           DateTime  @default(now())
   createdAt             DateTime  @default(now())
+
+  @@index([orderId])
 }
 
 model AuthSession {

@@ -32,6 +32,8 @@ import DeliveryEstimator from '../Components/DeliveryEstimator';
 import RelatedProductsSection from '../Components/RelatedProductsSection';
 import GuideDesign from '../Components/GuideDesign';
 import Feedback from '../Components/Feedback';
+import PaperGsmSelector from '../components/PaperGsmSelector';
+import DynamicQuantityTierPricing from '../components/DynamicQuantityTierPricing';
 
 export default function ProductDetail() {
   const { slug } = useParams();
@@ -517,9 +519,36 @@ export default function ProductDetail() {
 
   if (loading) {
     return (
-      <div className="min-h-[60vh] flex flex-col items-center justify-center py-20">
-        <Spinner size="xl" />
-        <p className="mt-4 text-gray-600 font-medium">Loading product specifications...</p>
+      <div className="mx-auto px-4 py-6 max-w-7xl animate-pulse">
+        {/* Breadcrumb Skeleton */}
+        <div className="h-4 bg-gray-200/80 rounded w-48 mb-6"></div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+          {/* Gallery Skeleton */}
+          <div className="lg:col-span-6 space-y-4">
+            <div className="w-full aspect-square bg-[#f8f9fa] rounded-2xl flex items-center justify-center p-8">
+              <div className="w-24 h-24 bg-gray-200/70 rounded-2xl"></div>
+            </div>
+            <div className="flex gap-3">
+              <div className="w-16 h-16 bg-gray-100 rounded-xl"></div>
+              <div className="w-16 h-16 bg-gray-100 rounded-xl"></div>
+              <div className="w-16 h-16 bg-gray-100 rounded-xl"></div>
+            </div>
+          </div>
+
+          {/* Configuration Skeleton */}
+          <div className="lg:col-span-6 space-y-5">
+            <div className="h-8 bg-gray-200/80 rounded-lg w-4/5"></div>
+            <div className="h-4 bg-gray-100 rounded w-1/2"></div>
+            <div className="h-10 bg-yellow-50 rounded-xl w-44 border border-yellow-200/50"></div>
+            <div className="space-y-3 pt-4 border-t border-gray-100">
+              <div className="h-12 bg-gray-100/80 rounded-xl w-full"></div>
+              <div className="h-12 bg-gray-100/80 rounded-xl w-full"></div>
+              <div className="h-12 bg-gray-100/80 rounded-xl w-full"></div>
+            </div>
+            <div className="h-12 bg-yellow-300/80 rounded-xl w-full mt-6"></div>
+          </div>
+        </div>
       </div>
     );
   }
@@ -607,14 +636,21 @@ export default function ProductDetail() {
             <h1 className="text-2xl sm:text-3xl font-extrabold text-gray-900 mt-2">{product.name}</h1>
             <p className="text-gray-500 text-xs sm:text-sm mt-1.5 leading-relaxed">{product.shortDescription}</p>
 
-            {/* Live Price Tag */}
-            <div className="mt-3 flex items-baseline gap-3">
+            {/* Live Price Tag with Per-Unit Savings Indicator */}
+            <div className="mt-3 flex flex-wrap items-baseline gap-3">
               <span className="text-3xl sm:text-4xl font-black text-red-600">₹{pricing.subtotal}</span>
-              <span className="text-xs sm:text-sm text-gray-500 font-medium">
-                {product.pricingType === 'PER_SQFT'
-                  ? `(₹${perUnitPrice} / Sq.ft for ${quantity} Sq.ft)`
-                  : `(₹${perUnitPrice} / ${product.quantityUnit?.replace(/s$/, '') || 'piece'} for ${quantity} ${product.quantityUnit || 'pcs'})`}
-              </span>
+              <div className="flex flex-col">
+                <span className="text-xs sm:text-sm text-gray-500 font-medium">
+                  {product.pricingType === 'PER_SQFT'
+                    ? `(₹${perUnitPrice} / Sq.ft for ${quantity} Sq.ft)`
+                    : `(₹${perUnitPrice} / ${product.quantityUnit?.replace(/s$/, '') || 'piece'} for ${quantity} ${product.quantityUnit || 'pcs'})`}
+                </span>
+                {quantity >= 500 && (
+                  <span className="text-[10px] font-extrabold text-green-700 flex items-center gap-1">
+                    ⚡ Bulk discount active (Price per unit drops for higher quantities)
+                  </span>
+                )}
+              </div>
             </div>
           </div>
 
@@ -627,7 +663,20 @@ export default function ProductDetail() {
                   .sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0))
               : (product.options || []).filter((o) => !o.isAddon);
 
-            if (!coreList.length) return null;
+            const hasGsmInCore = coreList.some((item) => {
+              const n = (hasDynamic ? (item.customLabel || item.master?.name) : item.optionName || '').toLowerCase();
+              const c = (hasDynamic ? (item.master?.code) : '').toLowerCase();
+              return (
+                n.includes('gsm') ||
+                n.includes('paper stock') ||
+                n.includes('paper quality') ||
+                n.includes('paper material') ||
+                c.includes('gsm') ||
+                c.includes('paper_stock') ||
+                c.includes('paper_quality') ||
+                c.includes('paper_material')
+              );
+            });
 
             return (
               <div className="mt-6 pt-4 border-t space-y-4">
@@ -642,6 +691,16 @@ export default function ProductDetail() {
                   )}
                 </div>
 
+                {/* If product has no explicit GSM option mapped in DB, provide universal Paper GSM interactive selector */}
+                {!hasGsmInCore && (
+                  <PaperGsmSelector
+                    product={product}
+                    selectedGsm={selectedOptions['Paper GSM'] || selectedOptions['GSM'] || '80 GSM'}
+                    onSelectGsm={(val) => handleOptionChange('Paper GSM', val)}
+                    isAvailableFn={() => true}
+                  />
+                )}
+
                 {coreList.map((item, idx) => {
                   const optName = hasDynamic ? (item.customLabel || item.master?.name) : item.optionName;
                   const optCode = hasDynamic ? item.master?.code : item.optionName;
@@ -652,6 +711,23 @@ export default function ProductDetail() {
                     compatibilityResult.hiddenOptions.includes(optCode)
                   ) {
                     return null;
+                  }
+
+                  const isGsmItem =
+                    (optCode && (optCode.includes('gsm') || optCode.includes('paper_stock') || optCode.includes('paper_quality') || optCode.includes('paper_material'))) ||
+                    (optName && (optName.toLowerCase().includes('gsm') || optName.toLowerCase().includes('paper stock') || optName.toLowerCase().includes('paper quality') || optName.toLowerCase().includes('paper material')));
+
+                  if (isGsmItem) {
+                    return (
+                      <PaperGsmSelector
+                        key={item.id || optName}
+                        product={product}
+                        selectedGsm={selectedOptions[optName]}
+                        onSelectGsm={(val) => handleOptionChange(optName, val)}
+                        optionConfig={item}
+                        isAvailableFn={(valLabel) => isOptionValueAvailable(optName, valLabel, optCode)}
+                      />
+                    );
                   }
 
                   const valuesList = hasDynamic
@@ -824,94 +900,17 @@ export default function ProductDetail() {
             );
           })()}
 
-          {/* Step 3: Quantity Selection (Fixed Slabs, Custom Quantity, or Both) */}
+          {/* Step 3: Quantity Selection & Dynamic Volume Tier Pricing */}
           <div className="mt-6 pt-4 border-t">
-            <div className="flex justify-between items-center mb-2">
-              <label className="font-extrabold text-xs uppercase tracking-wider text-gray-800">
-                Step 3: Select Quantity ({product.quantityUnit || 'Pieces'})
-              </label>
-              <span className="text-[11px] text-green-600 font-bold">⚡ Bulk savings applied</span>
-            </div>
-
-            {/* If product has Fixed slabs or BOTH */}
-            {(product.quantityType !== 'CUSTOM') && (
-              <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-5 gap-2">
-                {product.priceSlabs && product.priceSlabs.length > 0
-                  ? product.priceSlabs.map((slab, idx) => {
-                      const isSelected = quantity === slab.minQty;
-                      const firstSlab = product.priceSlabs[0];
-                      const baseUnitPrice = firstSlab ? firstSlab.singleSidePrice / firstSlab.minQty : 0;
-                      const thisUnitPrice = slab.singleSidePrice / slab.minQty;
-                      const savingsPct =
-                        idx > 0 && baseUnitPrice > 0 && thisUnitPrice < baseUnitPrice
-                          ? Math.round(((baseUnitPrice - thisUnitPrice) / baseUnitPrice) * 100)
-                          : 0;
-
-                      return (
-                        <button
-                          key={slab.id}
-                          type="button"
-                          onClick={() => setQuantity(slab.minQty)}
-                          className={`relative p-2.5 rounded-xl border text-center transition-all ${
-                            isSelected
-                              ? 'border-yellow-400 bg-yellow-400 text-black font-extrabold shadow-sm ring-2 ring-yellow-400/40'
-                              : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300 font-semibold'
-                          }`}
-                        >
-                          {savingsPct > 0 && (
-                            <span className="absolute -top-2 right-1 bg-green-600 text-white text-[8px] font-black px-1.5 py-0.2 rounded-full uppercase shadow-xs">
-                              Save {savingsPct}%
-                            </span>
-                          )}
-                          <span className="text-xs font-black block">{slab.minQty} {product.quantityUnit || 'pcs'}</span>
-                          <span className="text-[10px] text-gray-600 block mt-0.5">
-                            ₹{slab.singleSidePrice ? (slab.singleSidePrice / slab.minQty).toFixed(2) : ''}/{product.quantityUnit === 'Cards' ? 'card' : 'pc'}
-                          </span>
-                        </button>
-                      );
-                    })
-                  : [100, 200, 500, 1000].map((q) => (
-                      <button
-                        key={q}
-                        type="button"
-                        onClick={() => setQuantity(q)}
-                        className={`p-2.5 rounded-xl border text-center transition-all ${
-                          quantity === q
-                            ? 'border-yellow-400 bg-yellow-400 text-black font-extrabold shadow-sm'
-                            : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300 font-semibold'
-                        }`}
-                      >
-                        <span className="text-xs block font-bold">{q} {product.quantityUnit || 'pcs'}</span>
-                      </button>
-                    ))}
-              </div>
-            )}
-
-            {/* Custom Quantity Input if CUSTOM or BOTH */}
-            {(product.quantityType === 'CUSTOM' || product.quantityType === 'BOTH') && (
-              <div className="mt-3 p-3 bg-gray-50 border border-gray-200 rounded-xl flex items-center justify-between gap-3">
-                <div className="flex-1">
-                  <span className="text-xs font-bold text-gray-800 block">
-                    {product.quantityType === 'BOTH' ? 'Or Enter Custom Quantity:' : 'Specify Exact Order Quantity:'}
-                  </span>
-                  <span className="text-[10px] text-gray-500">
-                    Min: {product.customQtyMin || product.minQuantity || 50} | Step: {product.customQtyStep || 50}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="number"
-                    min={product.customQtyMin || product.minQuantity || 1}
-                    max={product.customQtyMax || 100000}
-                    step={product.customQtyStep || 1}
-                    value={quantity}
-                    onChange={(e) => setQuantity(Math.max(1, parseInt(e.target.value, 10) || 1))}
-                    className="w-28 p-1.5 text-center font-black text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-400"
-                  />
-                  <span className="text-xs font-bold text-gray-700">{product.quantityUnit || 'Pieces'}</span>
-                </div>
-              </div>
-            )}
+            <DynamicQuantityTierPricing
+              product={product}
+              quantity={quantity}
+              onQuantityChange={(newQty) => setQuantity(newQty)}
+              selectedOptions={selectedOptions}
+              artworkOption={artworkOption}
+              selectedPackage={selectedPackage}
+              selectedAddons={selectedAddons}
+            />
           </div>
 
           {/* Step 4: Mandatory Artwork & Design Options (Phase 16) */}

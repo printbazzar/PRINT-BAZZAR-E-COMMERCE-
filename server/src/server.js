@@ -111,13 +111,17 @@ app.use('/api', apiRouter);
 // 7. Global Centralized Error Handler (No sensitive data leakage)
 app.use(errorHandler);
 
-app.listen(PORT, () => {
-  console.log(`===========================================`);
-  console.log(`🚀 PRINT BAZZAR API SERVER RUNNING (SECURED)`);
-  console.log(`📡 URL: http://localhost:${PORT}`);
-  console.log(`📁 Uploads Directory: ${uploadDir}`);
-  console.log(`🛡️  Phase 3 Session & Cookie Security Active`);
-  console.log(`===========================================`);
-});
+let serverInstance = null;
+if (process.env.NODE_ENV !== 'test') {
+  serverInstance = app.listen(PORT, () => {
+    console.log(`===========================================`);
+    console.log(`🚀 PRINT BAZZAR API SERVER RUNNING (SECURED)`);
+    console.log(`📡 URL: http://localhost:${PORT}`);
+    console.log(`📁 Uploads Directory: ${uploadDir}`);
+    console.log(`🛡️  Phase 3 Session & Cookie Security Active`);
+    console.log(`===========================================`);
+  });
+}
 
+export { app, serverInstance };
 export default app;

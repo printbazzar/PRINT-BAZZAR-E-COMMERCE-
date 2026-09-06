@@ -301,32 +301,79 @@ export function calculatePricing({
         // Custom Quantity or In-Between Slabs
         if (product.customUnitPrice && product.customUnitPrice > 0) {
           pricingMethod = 'CUSTOM_UNIT';
-          basePrice = Math.round(product.customUnitPrice * qty * (isDoubleSide ? 1.35 : 1.0));
+          // Progressive discount curve on custom unit rate for higher volumes
+          const volMultiplier = qty >= 5000 ? 0.65 : qty >= 2500 ? 0.75 : qty >= 1000 ? 0.85 : 1.0;
+          basePrice = Math.round(product.customUnitPrice * volMultiplier * qty * (isDoubleSide ? 1.35 : 1.0));
         } else {
-          // Nearest volume slab unit interpolation
-          const nearestSlab = sortedSlabs.slice().reverse().find((s) => qty >= s.minQty) || sortedSlabs[0];
-          const slabBase = isDoubleSide && nearestSlab.doubleSidePrice > 0
-            ? nearestSlab.doubleSidePrice
-            : nearestSlab.singleSidePrice || (nearestSlab.unitPrice * nearestSlab.minQty);
-          const perUnit = slabBase / nearestSlab.minQty;
-          basePrice = Math.round(perUnit * qty);
+          // Smooth progressive interpolation across volume slabs
+          let lowerSlab = null;
+          let upperSlab = null;
+          for (let i = 0; i < sortedSlabs.length; i++) {
+            if (sortedSlabs[i].minQty <= qty) {
+              lowerSlab = sortedSlabs[i];
+              upperSlab = sortedSlabs[i + 1] || null;
+            }
+          }
+
+          if (!lowerSlab) {
+            // qty is less than first slab: unit rate based on first slab + small volume premium
+            const firstSlab = sortedSlabs[0];
+            const firstBase = isDoubleSide && firstSlab.doubleSidePrice > 0
+              ? firstSlab.doubleSidePrice
+              : (firstSlab.singleSidePrice || (firstSlab.unitPrice * firstSlab.minQty));
+            const unitRate = (firstBase / firstSlab.minQty) * 1.15;
+            basePrice = Math.round(unitRate * qty);
+          } else if (upperSlab) {
+            // qty is between lowerSlab and upperSlab: smooth interpolation ensures unit price drops as qty rises
+            const lowerBase = isDoubleSide && lowerSlab.doubleSidePrice > 0
+              ? lowerSlab.doubleSidePrice
+              : (lowerSlab.singleSidePrice || (lowerSlab.unitPrice * lowerSlab.minQty));
+            const upperBase = isDoubleSide && upperSlab.doubleSidePrice > 0
+              ? upperSlab.doubleSidePrice
+              : (upperSlab.singleSidePrice || (upperSlab.unitPrice * upperSlab.minQty));
+
+            const lowerUnit = lowerBase / lowerSlab.minQty;
+            const upperUnit = upperBase / upperSlab.minQty;
+
+            const t = (qty - lowerSlab.minQty) / (upperSlab.minQty - lowerSlab.minQty);
+            const interpolatedUnit = lowerUnit - t * (lowerUnit - upperUnit);
+            basePrice = Math.round(interpolatedUnit * qty);
+          } else {
+            // qty is beyond the highest slab: award additional bulk volume efficiency
+            const highestSlab = lowerSlab;
+            const highestBase = isDoubleSide && highestSlab.doubleSidePrice > 0
+              ? highestSlab.doubleSidePrice
+              : (highestSlab.singleSidePrice || (highestSlab.unitPrice * highestSlab.minQty));
+            const highestUnit = highestBase / highestSlab.minQty;
+            const volumeEfficiency = Math.max(0.72, 1 - Math.log10(Math.max(1, qty / highestSlab.minQty)) * 0.18);
+            const unitRate = highestUnit * volumeEfficiency;
+            basePrice = Math.round(unitRate * qty);
+          }
         }
       }
     } else if (product.customUnitPrice && product.customUnitPrice > 0) {
       // Product configured with direct custom unit rate (e.g. Banners, Stickers per sq.ft)
       pricingMethod = 'CUSTOM_UNIT';
-      basePrice = Math.round(product.customUnitPrice * qty * (isDoubleSide ? 1.35 : 1.0));
+      const volMultiplier = qty >= 5000 ? 0.65 : qty >= 2500 ? 0.75 : qty >= 1000 ? 0.85 : 1.0;
+      basePrice = Math.round(product.customUnitPrice * volMultiplier * qty * (isDoubleSide ? 1.35 : 1.0));
     } else {
-      // Basic starting price fallback
+      // Progressive volume discount curve based on startingPrice
       pricingMethod = 'STARTING_PRICE';
-      let unit = product.startingPrice || 100;
-      if (qty > 100) {
-        unit = (unit / 100) * qty;
-      }
-      if (isDoubleSide) {
-        unit = unit * 1.35;
-      }
-      basePrice = Math.round(unit);
+      const baseStarting = product.startingPrice || 100;
+      const baseQty = product.minQuantity || 100;
+      const baseUnit = baseStarting / Math.max(1, baseQty);
+
+      // Progressive discount curve: price per piece drops for higher quantities
+      let discountMultiplier = 1.0;
+      if (qty >= 5000) discountMultiplier = 0.35;
+      else if (qty >= 2500) discountMultiplier = 0.44;
+      else if (qty >= 1000) discountMultiplier = 0.54;
+      else if (qty >= 500) discountMultiplier = 0.68;
+      else if (qty >= 250) discountMultiplier = 0.82;
+      else if (qty < 100) discountMultiplier = 1.15;
+
+      const effectiveUnit = baseUnit * discountMultiplier * (isDoubleSide ? 1.35 : 1.0);
+      basePrice = Math.round(effectiveUnit * qty);
     }
   }
 
@@ -443,6 +490,45 @@ export function calculatePricing({
     }
   }
 
+  // Universal Paper GSM dynamic pricing modifier if not already handled by optionMappings
+  const hasExplicitGsmMapping = appliedModifiers.some((m) => {
+    const n = (m.optionName || '').toLowerCase();
+    return n.includes('gsm') || n.includes('paper') || n.includes('stock');
+  });
+
+  if (!hasExplicitGsmMapping) {
+    const gsmEntry = Object.entries(selectedOptions).find(([k]) => {
+      const kl = k.toLowerCase();
+      return kl.includes('gsm') || kl.includes('paper') || kl.includes('stock');
+    });
+    if (gsmEntry) {
+      const gsmVal = String(gsmEntry[1] || '').toLowerCase();
+      let perUnitGsmCost = 0;
+      if (gsmVal.includes('400') || gsmVal.includes('velvet royal')) perUnitGsmCost = 1.60;
+      else if (gsmVal.includes('350')) perUnitGsmCost = 1.20;
+      else if (gsmVal.includes('300') || gsmVal.includes('kraft')) perUnitGsmCost = 0.90;
+      else if (gsmVal.includes('250')) perUnitGsmCost = 0.60;
+      else if (gsmVal.includes('170')) perUnitGsmCost = 0.40;
+      else if (gsmVal.includes('130')) perUnitGsmCost = 0.25;
+      else if (gsmVal.includes('120') || gsmVal.includes('alabaster')) perUnitGsmCost = 0.20;
+      else if (gsmVal.includes('100') || gsmVal.includes('bond')) perUnitGsmCost = 0.10;
+      else if (gsmVal.includes('80')) perUnitGsmCost = 0; // 80 GSM baseline (Included)
+
+      if (perUnitGsmCost > 0) {
+        const gsmTotalCost = Math.round(perUnitGsmCost * qty);
+        optionSurcharges += gsmTotalCost;
+        appliedModifiers.push({
+          optionName: gsmEntry[0],
+          valueLabel: gsmEntry[1],
+          modifierType: 'PER_UNIT',
+          modifierValue: perUnitGsmCost,
+          amount: gsmTotalCost,
+          isAddon: false,
+        });
+      }
+    }
+  }
+
   const productPrice = isAvailable ? Math.round(basePrice + optionSurcharges) : 0;
   const subtotal = isAvailable ? Math.round(productPrice + designFee) : 0;
 
@@ -499,3 +585,76 @@ export function calculatePricing({
 }
 
 export const calculateProductPrice = calculatePricing;
+
+/**
+ * Calculates progressive quantity tiers with per-unit price drops and savings percentages
+ */
+export function getQuantityTierPricing({
+  product,
+  selectedOptions = {},
+  artworkOption = null,
+  designPackage = null,
+  selectedAddons = [],
+  customTiers = null,
+}) {
+  if (!product) return [];
+
+  // Determine tiers to display
+  let tierQuantities = [];
+  if (customTiers && Array.isArray(customTiers) && customTiers.length > 0) {
+    tierQuantities = customTiers;
+  } else if (product.priceSlabs && product.priceSlabs.length > 1) {
+    tierQuantities = [...product.priceSlabs].map((s) => s.minQty).sort((a, b) => a - b);
+  } else {
+    // Standard industry printing tiers based on product minQuantity
+    const minQ = product.minQuantity || 100;
+    if (minQ >= 500) {
+      tierQuantities = [500, 1000, 2000, 3000, 5000];
+    } else if (minQ >= 100) {
+      tierQuantities = [100, 250, 500, 1000, 2500, 5000];
+    } else if (minQ >= 25) {
+      tierQuantities = [25, 50, 100, 250, 500, 1000];
+    } else {
+      tierQuantities = [1, 5, 10, 25, 50, 100];
+    }
+  }
+
+  // Calculate base tier unit price for savings comparison
+  const baseQty = tierQuantities[0] || 100;
+  const baseResult = calculatePricing({
+    product,
+    quantity: baseQty,
+    selectedOptions,
+    artworkOption,
+    designPackage,
+    selectedAddons,
+  });
+  const baseUnitPrice = parseFloat(baseResult.unitPrice) || (baseResult.subtotal / Math.max(1, baseQty)) || 1;
+
+  return tierQuantities.map((tQty, idx) => {
+    const res = calculatePricing({
+      product,
+      quantity: tQty,
+      selectedOptions,
+      artworkOption,
+      designPackage,
+      selectedAddons,
+    });
+    const thisUnitPrice = parseFloat(res.unitPrice) || (res.subtotal / Math.max(1, tQty)) || 0;
+    const savingsPct =
+      idx > 0 && baseUnitPrice > 0 && thisUnitPrice < baseUnitPrice
+        ? Math.round(((baseUnitPrice - thisUnitPrice) / baseUnitPrice) * 100)
+        : 0;
+
+    return {
+      quantity: tQty,
+      totalPrice: res.subtotal,
+      unitPrice: res.unitPrice,
+      savingsPct,
+      isPopular: tQty === 1000 || (tierQuantities.length >= 4 && idx === Math.floor(tierQuantities.length / 2)),
+      isBestValue: idx === tierQuantities.length - 1,
+      pricing: res,
+    };
+  });
+}
+

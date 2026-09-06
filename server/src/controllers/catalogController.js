@@ -1,6 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { calculatePricing } from '../utils/pricingEngine.js';
-import { toCustomerSafeProduct } from '../utils/projections.js';
+import { toCustomerSafeProduct, toCustomerGridProduct } from '../utils/projections.js';
 
 const prisma = new PrismaClient();
 
@@ -24,10 +24,17 @@ export const getCategories = async (req, res) => {
   }
 };
 
-// Get single category by slug
+// Get single category by slug with paginated products (10-12 per page)
 export const getCategoryBySlug = async (req, res) => {
   try {
     const { slug } = req.params;
+    const {
+      page = 1,
+      limit = 12,
+      sortBy = 'default',
+      search = '',
+    } = req.query;
+
     const category = await prisma.category.findFirst({
       where: {
         OR: [
@@ -36,22 +43,65 @@ export const getCategoryBySlug = async (req, res) => {
         ],
         isActive: true,
       },
-      include: {
-        products: {
-          where: { status: 'ACTIVE' },
-          include: {
-            images: { orderBy: { displayOrder: 'asc' } },
-          },
-          orderBy: { createdAt: 'asc' },
-        },
-      },
     });
 
     if (!category) {
       return res.status(404).json({ success: false, message: 'Category not found.' });
     }
 
-    return res.json({ success: true, data: category });
+    const pageSize = Math.min(50, Math.max(1, parseInt(limit, 10) || 12));
+    const currentPage = Math.max(1, parseInt(page, 10) || 1);
+    const skip = (currentPage - 1) * pageSize;
+
+    const productWhere = {
+      categoryId: category.id,
+      status: 'ACTIVE',
+    };
+
+    if (search && search.trim()) {
+      const q = search.trim();
+      productWhere.OR = [
+        { name: { contains: q, mode: 'insensitive' } },
+        { sku: { contains: q, mode: 'insensitive' } },
+        { shortDescription: { contains: q, mode: 'insensitive' } },
+      ];
+    }
+
+    let orderBy = { createdAt: 'asc' };
+    if (sortBy === 'priceLow' || sortBy === 'priceAsc') orderBy = { startingPrice: 'asc' };
+    if (sortBy === 'priceHigh' || sortBy === 'priceDesc') orderBy = { startingPrice: 'desc' };
+    if (sortBy === 'nameAsc') orderBy = { name: 'asc' };
+
+    const [products, totalProducts] = await Promise.all([
+      prisma.product.findMany({
+        where: productWhere,
+        include: {
+          category: { select: { id: true, name: true, slug: true } },
+          images: { take: 2, orderBy: { displayOrder: 'asc' } },
+        },
+        orderBy,
+        take: pageSize,
+        skip,
+      }),
+      prisma.product.count({ where: productWhere }),
+    ]);
+
+    const safeProducts = products.map(toCustomerGridProduct);
+
+    return res.json({
+      success: true,
+      data: {
+        ...category,
+        products: safeProducts,
+      },
+      pagination: {
+        total: totalProducts,
+        page: currentPage,
+        limit: pageSize,
+        totalPages: Math.ceil(totalProducts / pageSize),
+        hasMore: skip + products.length < totalProducts,
+      },
+    });
   } catch (error) {
     console.error('Error fetching category:', error);
     return res.status(500).json({ success: false, message: 'Failed to fetch category details.' });
@@ -148,7 +198,7 @@ export const getProducts = async (req, res) => {
         where,
         include: {
           category: { select: { id: true, name: true, slug: true } },
-          images: { orderBy: { displayOrder: 'asc' } },
+          images: { take: 2, orderBy: { displayOrder: 'asc' } },
         },
         orderBy,
         take,
@@ -157,7 +207,7 @@ export const getProducts = async (req, res) => {
       prisma.product.count({ where }),
     ]);
 
-    const safeProducts = products.map(toCustomerSafeProduct);
+    const safeProducts = products.map(toCustomerGridProduct);
 
     return res.json({
       success: true,
@@ -167,6 +217,7 @@ export const getProducts = async (req, res) => {
         page: parseInt(page, 10),
         limit: take,
         totalPages: Math.ceil(totalCount / take),
+        hasMore: skip + products.length < totalCount,
       },
     });
   } catch (error) {

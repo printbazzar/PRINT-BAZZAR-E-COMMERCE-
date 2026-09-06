@@ -20,5 +20,15 @@ export default defineConfig({
   base: '/',
   build: {
     outDir: 'dist',
+    chunkSizeWarningLimit: 650,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+          'vendor-ui': ['flowbite-react', 'react-icons'],
+          'vendor-swiper': ['swiper'],
+        },
+      },
+    },
   },
 });

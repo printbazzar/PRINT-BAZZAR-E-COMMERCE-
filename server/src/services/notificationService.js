@@ -17,6 +17,18 @@ const FRONTEND_URL = process.env.CLIENT_URL || 'https://printbazzar.online';
 
 // Notification Templates
 export const TEMPLATES = {
+  ORDER_PROCESSING: (order) => ({
+    title: 'Order Processing',
+    whatsappText: `🎉 *PRINT BAZZAR — Order Placed & Processing!*\n\nHello ${order.customerName},\nThank you for choosing Print Bazzar! Your order *#${order.orderNumber}* (₹${order.grandTotal}) has been received and is now *Processing*.\n\nOur prepress team is verifying your specifications.\n\n📍 *Live Order Tracking:* ${FRONTEND_URL}/track-order/${order.orderNumber}\n\nNeed support? Call us: +91 96290 98565`,
+    smsText: `Print Bazzar: Order #${order.orderNumber} is Processing! Total: Rs.${order.grandTotal}. Track live: ${FRONTEND_URL}/track-order/${order.orderNumber}`,
+  }),
+
+  ORDER_PLACED: (order) => ({
+    title: 'Order Processing',
+    whatsappText: `🎉 *PRINT BAZZAR — Order Placed & Processing!*\n\nHello ${order.customerName},\nThank you for choosing Print Bazzar! Your order *#${order.orderNumber}* (₹${order.grandTotal}) has been received and is now *Processing*.\n\nOur prepress team is verifying your specifications.\n\n📍 *Live Order Tracking:* ${FRONTEND_URL}/track-order/${order.orderNumber}\n\nNeed support? Call us: +91 96290 98565`,
+    smsText: `Print Bazzar: Order #${order.orderNumber} is Processing! Total: Rs.${order.grandTotal}. Track live: ${FRONTEND_URL}/track-order/${order.orderNumber}`,
+  }),
+
   ORDER_CONFIRMED: (order) => ({
     title: 'Order Confirmed',
     whatsappText: `🎉 *PRINT BAZZAR — Order Confirmed!*\n\nHello ${order.customerName},\nThank you for choosing Print Bazzar! Your order *#${order.orderNumber}* (₹${order.grandTotal}) has been successfully confirmed.\n\nOur prepress team is preparing your print files.\n\n📍 *Live Order Tracking:* ${FRONTEND_URL}/track-order/${order.orderNumber}\n\nNeed support? Call us: +91 96290 98565`,
@@ -82,6 +94,7 @@ export const sendOrderNotification = async ({ order, eventType, extra = {} }) =>
         await fetch(whatsappWebhook, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          signal: AbortSignal.timeout(3000),
           body: JSON.stringify({
             phone: recipientPhone,
             message: whatsappText,
@@ -101,6 +114,7 @@ export const sendOrderNotification = async ({ order, eventType, extra = {} }) =>
         await fetch(smsGatewayUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          signal: AbortSignal.timeout(3000),
           body: JSON.stringify({
             to: recipientPhone,
             body: smsText,
@@ -114,6 +128,33 @@ export const sendOrderNotification = async ({ order, eventType, extra = {} }) =>
     // 3. Clean Transaction Log for Factory & Support Audit
     console.log(
       `🔔 [NOTIFICATION DISPATCHED] Event: ${eventType} | Recipient: ${recipientPhone} | Order: ${order.orderNumber}`
+    );
+
+    // 4. Admin Dashboard Alert Notification (Event Stream / Webhook / Audit Log)
+    const adminWebhook = process.env.ADMIN_NOTIFICATION_WEBHOOK_URL;
+    if (adminWebhook) {
+      try {
+        await fetch(adminWebhook, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: AbortSignal.timeout(3000),
+          body: JSON.stringify({
+            event: 'ORDER_NOTIFICATION',
+            orderNumber: order.orderNumber,
+            customerName: order.customerName,
+            customerMobile: recipientPhone,
+            grandTotal: order.grandTotal,
+            orderStatus: order.orderStatus,
+            eventType,
+            timestamp: new Date().toISOString(),
+          }),
+        });
+      } catch (adminErr) {
+        console.warn(`[NOTIFICATION] Admin webhook warning:`, adminErr.message);
+      }
+    }
+    console.log(
+      `📢 [ADMIN NOTIFICATION] Order Alert: #${order.orderNumber} | Customer: ${order.customerName} (${recipientPhone}) | Total: ₹${order.grandTotal} | Status: ${order.orderStatus || 'Processing'}`
     );
 
     return {

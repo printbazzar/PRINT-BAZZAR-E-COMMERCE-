@@ -70,6 +70,7 @@ import {
 import {
   customerSignup,
   customerLogin,
+  customerGoogleLogin,
   customerRefreshToken,
   customerLogout,
   authenticateCustomer,
@@ -166,6 +167,7 @@ const router = express.Router();
 // ==========================================
 router.post('/customer/auth/signup', customerSignupLimiter, customerSignup);
 router.post('/customer/auth/login', customerLoginLimiter, customerLogin);
+router.post('/customer/auth/google', customerLoginLimiter, customerGoogleLogin);
 router.post('/customer/auth/send-otp', customerLoginLimiter, sendCustomerOtp);
 router.post('/customer/auth/verify-otp', verifyCustomerOtp);
 router.post('/customer/auth/refresh', customerRefreshToken);

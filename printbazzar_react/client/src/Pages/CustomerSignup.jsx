@@ -14,6 +14,7 @@ import {
   HiOutlineMapPin,
 } from 'react-icons/hi2';
 import { useCustomerAuth } from '../context/CustomerAuthContext';
+import GoogleAuthButton from '../Components/GoogleAuthButton';
 
 export default function CustomerSignup() {
   const [accountType, setAccountType] = useState('B2C_RETAIL'); // 'B2C_RETAIL' | 'B2B_CORPORATE'
@@ -116,6 +117,22 @@ export default function CustomerSignup() {
             {error}
           </Alert>
         )}
+
+        {/* 1-Click Continue with Google (Zero SMS Gateway Cost) */}
+        <div className="mb-5">
+          <GoogleAuthButton
+            text="Sign Up with Google"
+            onSuccess={() => navigate('/account/dashboard')}
+            onError={(errMsg) => setError(errMsg)}
+          />
+          <div className="relative flex py-4 items-center">
+            <div className="flex-grow border-t border-gray-200"></div>
+            <span className="flex-shrink mx-3 text-gray-400 text-[11px] font-bold uppercase tracking-wider">
+              Or fill registration form
+            </span>
+            <div className="flex-grow border-t border-gray-200"></div>
+          </div>
+        </div>
 
         <form onSubmit={handleSubmit} className="space-y-4 text-xs">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

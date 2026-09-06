@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import LazyImage from "./LazyImage";
 import { products } from "../assets/data/HomeMarketing.js";
 
 // Function to shuffle an array
@@ -28,9 +29,10 @@ export function PopularProducts() {
               key={index}
               className="flex flex-col items-center justify-center text-center p-3 bg-white rounded-lg shadow-md hover:shadow-lg transition-shadow group"
             >
-              <img
+              <LazyImage
                 src={product.image}
                 alt={product.name}
+                containerClassName="w-full h-auto rounded-t-lg overflow-hidden"
                 className="w-full h-auto md:h-auto object-cover rounded-t-lg transition-transform duration-300 transform group-hover:scale-105"
               />
               <h3 className="text-md md:text-lg font-medium pt-3">{product.name}</h3>

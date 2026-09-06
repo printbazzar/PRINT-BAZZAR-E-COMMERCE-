@@ -21,6 +21,8 @@ import { useCart } from "../context/CartContext";
 import { useAuth } from "../context/AuthContext";
 import { useCustomerAuth } from "../context/CustomerAuthContext";
 import { api } from "../services/api";
+import TopAnnouncementBar from "./TopAnnouncementBar";
+import CategoryNavBar from "./CategoryNavBar";
 
 export default function Header() {
   const [isOpenMenu, setIsOpenMenu] = useState(false);
@@ -68,6 +70,9 @@ export default function Header() {
 
   return (
     <header className="sticky top-0 z-50 shadow-md">
+      {/* Top Value Announcement Bar */}
+      <TopAnnouncementBar />
+
       {/* Main Spacious Corporate Header */}
       <div className="bg-black text-white py-3.5 sm:py-4 px-4 sm:px-8 border-b border-gray-800">
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-4 lg:gap-8">
@@ -180,6 +185,9 @@ export default function Header() {
           </div>
         </div>
       </div>
+
+      {/* Desktop Quick Category Bar */}
+      <CategoryNavBar />
 
       {/* Categories Flyout Drawer */}
       <Drawer

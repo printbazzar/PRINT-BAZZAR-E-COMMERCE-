@@ -39,9 +39,10 @@ export default function AdminOrders() {
   };
 
   const getStatusBadgeClass = (status) => {
-    switch (status) {
+    switch (status?.toUpperCase()) {
       case 'DELIVERED':
         return 'bg-green-100 text-green-800';
+      case 'PROCESSING':
       case 'ORDER_RECEIVED':
         return 'bg-blue-100 text-blue-800';
       case 'CONFIRMED':
@@ -91,6 +92,7 @@ export default function AdminOrders() {
           size="sm"
         >
           <option value="ALL">All Order Statuses</option>
+          <option value="Processing">Processing</option>
           <option value="ORDER_RECEIVED">ORDER_RECEIVED</option>
           <option value="CONFIRMED">CONFIRMED</option>
           <option value="PRODUCTION_QUEUE">PRODUCTION_QUEUE</option>

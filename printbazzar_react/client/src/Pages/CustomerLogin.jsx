@@ -4,6 +4,7 @@ import { Button, TextInput, Label, Alert, Spinner } from 'flowbite-react';
 import { HiOutlineMail, HiOutlineLockClosed, HiOutlineUser } from 'react-icons/hi';
 import { HiOutlineBuildingOffice2, HiOutlineShieldCheck } from 'react-icons/hi2';
 import { useCustomerAuth } from '../context/CustomerAuthContext';
+import GoogleAuthButton from '../Components/GoogleAuthButton';
 
 export default function CustomerLogin() {
   const [identifier, setIdentifier] = useState('');
@@ -50,6 +51,21 @@ export default function CustomerLogin() {
             {error}
           </Alert>
         )}
+
+        {/* 1-Click Continue with Google (Zero SMS Gateway Cost) */}
+        <div className="mb-5">
+          <GoogleAuthButton
+            onSuccess={() => navigate(redirectPath)}
+            onError={(errMsg) => setError(errMsg)}
+          />
+          <div className="relative flex py-4 items-center">
+            <div className="flex-grow border-t border-gray-200"></div>
+            <span className="flex-shrink mx-3 text-gray-400 text-[11px] font-bold uppercase tracking-wider">
+              Or with Password
+            </span>
+            <div className="flex-grow border-t border-gray-200"></div>
+          </div>
+        </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>

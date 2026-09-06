@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { HiOutlineSparkles, HiOutlineArrowRight } from 'react-icons/hi';
+import LazyImage from './LazyImage';
 import { api } from '../services/api';
 
 export default function RelatedProductsSection({ currentProductId, categorySlug, categoryName }) {
@@ -53,7 +54,7 @@ export default function RelatedProductsSection({ currentProductId, categorySlug,
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6 lg:gap-8">
-        {products.map((item) => (
+        {products.map((item, index) => (
           <Link
             key={item.id}
             to={`/product/${item.slug}`}
@@ -62,9 +63,14 @@ export default function RelatedProductsSection({ currentProductId, categorySlug,
             <div>
               {/* Full-View Image Container - Borderless & Stroke-Free */}
               <div className="relative w-full aspect-square bg-[#f8f9fa] rounded-2xl overflow-hidden mb-3 flex items-center justify-center p-3 sm:p-4 group-hover:bg-[#f1f3f5] transition-colors">
-                <img
-                  src={item.thumbnailUrl || '/default-image.png'}
+                <LazyImage
+                  src={item.thumbnailUrl || (item.images?.[0]?.imageUrl || item.images?.[0]?.url) || '/default-image.png'}
                   alt={item.name}
+                  priority={index < 2}
+                  width={300}
+                  height={300}
+                  sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
+                  containerClassName="w-full h-full flex items-center justify-center"
                   className="w-full h-full object-contain filter drop-shadow-sm group-hover:scale-105 transition-transform duration-500"
                 />
                 {item.isBestSeller && (

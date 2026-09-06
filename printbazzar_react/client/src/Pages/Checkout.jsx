@@ -1,35 +1,27 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Button, TextInput, Label, Select, Checkbox, Spinner, Alert, Modal } from 'flowbite-react';
-import { HiHome, HiLockClosed, HiCheckCircle, HiOutlineSparkles, HiOutlineTruck, HiOutlineDocumentText, HiOutlineRefresh } from 'react-icons/hi';
+import { Button, TextInput, Label, Select, Checkbox, Spinner, Alert } from 'flowbite-react';
+import { HiHome, HiLockClosed, HiCheckCircle, HiOutlineSparkles, HiOutlineTruck, HiOutlineRefresh } from 'react-icons/hi';
 import { HiOutlineBuildingOffice2 } from 'react-icons/hi2';
 import { useCart } from '../context/CartContext';
 import { useCustomerAuth } from '../context/CustomerAuthContext';
 import { api } from '../services/api';
 import PaymentGatewayModal from '../Components/PaymentGatewayModal';
+import LazyImage from '../Components/LazyImage';
+import GoogleAuthButton from '../Components/GoogleAuthButton';
 import { useBusinessInfo } from '../context/BusinessInfoContext';
 
 export default function Checkout() {
   const { businessInfo } = useBusinessInfo();
   const { cartItems, cartSubtotal, cartShipping, cartGrandTotal, clearCart } = useCart();
-  const { customer, isCorporate, sendOtp, verifyOtp } = useCustomerAuth();
+  const { customer, isCorporate, setCustomerSession } = useCustomerAuth();
   const navigate = useNavigate();
 
   const [storeSettings, setStoreSettings] = useState(null);
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const [activePaymentOrder, setActivePaymentOrder] = useState(null);
-
-  // Quick OTP Authentication State
-  const [otpModalOpen, setOtpModalOpen] = useState(false);
-  const [otpMobile, setOtpMobile] = useState('');
-  const [otpCode, setOtpCode] = useState('');
-  const [otpSent, setOtpSent] = useState(false);
-  const [otpLoading, setOtpLoading] = useState(false);
-  const [otpError, setOtpError] = useState('');
-  const [otpTimer, setOtpTimer] = useState(0);
-
-  // Mandatory Final Order Review Modal State
-  const [reviewModalOpen, setReviewModalOpen] = useState(false);
+  const [submitStatusMessage, setSubmitStatusMessage] = useState('');
+  const isSubmittingRef = useRef(false);
 
   const [formData, setFormData] = useState({
     customerName: customer?.name || '',
@@ -133,102 +125,19 @@ export default function Checkout() {
     return Object.keys(newErrors).length === 0;
   };
 
-  // OTP Timer Countdown
-  useEffect(() => {
-    let interval;
-    if (otpTimer > 0) {
-      interval = setInterval(() => setOtpTimer((t) => t - 1), 1000);
-    }
-    return () => clearInterval(interval);
-  }, [otpTimer]);
-
-  const handleOpenOtpModal = () => {
-    setOtpMobile(formData.customerMobile || '');
-    setOtpCode('');
-    setOtpError('');
-    setOtpSent(false);
-    setOtpModalOpen(true);
-  };
-
-  const handleSendOtp = async () => {
-    if (!otpMobile.trim() || otpMobile.trim().length < 10) {
-      setOtpError('Please enter a valid 10-digit mobile number.');
-      return;
-    }
-    setOtpLoading(true);
-    setOtpError('');
-    try {
-      const res = await sendOtp(otpMobile.trim());
-      if (res.success) {
-        setOtpSent(true);
-        setOtpTimer(60);
-      } else {
-        setOtpError(res.message || 'Failed to send OTP code.');
-      }
-    } catch (err) {
-      setOtpError(err.message || 'Error sending OTP. Please try again.');
-    } finally {
-      setOtpLoading(false);
-    }
-  };
-
-  const handleVerifyOtp = async () => {
-    if (!otpCode.trim() || otpCode.trim().length < 6) {
-      setOtpError('Please enter the 6-digit OTP code.');
-      return;
-    }
-    setOtpLoading(true);
-    setOtpError('');
-    try {
-      const res = await verifyOtp(otpMobile.trim(), otpCode.trim(), formData.customerName);
-      if (res.success) {
-        setOtpModalOpen(false);
-        if (res.customer) {
-          setFormData((prev) => ({
-            ...prev,
-            customerName: res.customer.name || prev.customerName,
-            customerMobile: res.customer.mobile || prev.customerMobile,
-            customerWhatsapp: res.customer.whatsapp || res.customer.mobile || prev.customerWhatsapp,
-            customerEmail: res.customer.email || prev.customerEmail,
-            street: res.customer.address || prev.street,
-            city: res.customer.city || prev.city,
-            pincode: res.customer.pincode || prev.pincode,
-            gstNumber: res.customer.gstNumber || prev.gstNumber,
-          }));
-        }
-      } else {
-        setOtpError(res.message || 'Invalid or expired OTP code.');
-      }
-    } catch (err) {
-      setOtpError(err.message || 'OTP verification failed.');
-    } finally {
-      setOtpLoading(false);
-    }
-  };
-
-  // Step 1: Validate and open Final Order Review Modal (Enforcing Authentication Gate)
+  // 1-Click Direct Order Placement
   const handleSubmitOrder = (e) => {
     if (e && e.preventDefault) e.preventDefault();
     if (!validateForm()) return;
-    if (!customer) {
-      setSubmitError('Please verify your mobile number with OTP to continue to payment.');
-      handleOpenOtpModal();
-      return;
-    }
-    setReviewModalOpen(true);
+    executeOrderPlacement();
   };
 
-  // Step 2: Customer confirmed review -> Execute Order Placement
   const executeOrderPlacement = async () => {
-    if (isSubmitting) return;
-    if (!customer) {
-      setSubmitError('Please verify your mobile number with OTP to continue.');
-      handleOpenOtpModal();
-      return;
-    }
+    if (isSubmittingRef.current || isSubmitting) return;
+    isSubmittingRef.current = true;
     setIsSubmitting(true);
     setSubmitError('');
-    setReviewModalOpen(false);
+    setSubmitStatusMessage('Securing print specifications & generating production jobs...');
 
     try {
       const isPickup = formData.deliveryMethod === 'STORE_PICKUP';
@@ -291,6 +200,11 @@ export default function Checkout() {
       const res = await api.createOrder(orderPayload);
 
       if (res.success && res.orderNumber) {
+        // Auto-authenticate guest customer so they can track orders immediately
+        if (res.customerToken && res.customer && setCustomerSession) {
+          setCustomerSession(res.customer, res.customerToken);
+        }
+
         if (formData.paymentMethod === 'CASH') {
           // Cash on Delivery / Shop Pickup
           clearCart();
@@ -313,12 +227,16 @@ export default function Checkout() {
           setPaymentModalOpen(true);
         }
       } else {
-        setSubmitError(res.message || 'Failed to place order.');
+        setSubmitError(res.message || 'Failed to place order. Please try again.');
+        window.scrollTo({ top: 0, behavior: 'smooth' });
       }
     } catch (err) {
-      setSubmitError(err.message || 'An unexpected error occurred.');
+      setSubmitError(err.message || 'An unexpected error occurred. Please check your connection and try again.');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     } finally {
+      isSubmittingRef.current = false;
       setIsSubmitting(false);
+      setSubmitStatusMessage('');
     }
   };
 
@@ -337,8 +255,22 @@ export default function Checkout() {
       </h1>
 
       {submitError && (
-        <div className="mb-6 bg-red-50 border border-red-200 text-red-700 p-4 rounded-xl text-sm font-medium">
-          ⚠ {submitError}
+        <div className="mb-6 bg-red-50 border border-red-200 text-red-700 p-4 rounded-xl text-sm font-medium flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
+          <div className="flex items-start gap-2">
+            <span className="text-lg">⚠</span>
+            <div>
+              <strong className="block text-red-800">Order Submission Notice:</strong>
+              <span>{submitError}</span>
+            </div>
+          </div>
+          <Button
+            size="xs"
+            color="failure"
+            onClick={handleSubmitOrder}
+            className="font-bold whitespace-nowrap self-end sm:self-center shadow-xs"
+          >
+            Retry Order ➔
+          </Button>
         </div>
       )}
 
@@ -350,36 +282,51 @@ export default function Checkout() {
             <div className="flex flex-wrap justify-between items-center gap-2 mb-4">
               <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
                 <span className="w-6 h-6 bg-yellow-400 text-black text-xs font-extrabold rounded-full flex items-center justify-center">1</span>
-                Contact & Account Verification
+                Contact & Customer Details
               </h2>
-              {customer ? (
+              {customer && (
                 <span className="text-xs bg-green-100 text-green-800 font-bold px-2.5 py-1 rounded-full flex items-center gap-1">
-                  <HiCheckCircle className="w-4 h-4 text-green-600" /> Account Verified ({customer.mobile})
+                  <HiCheckCircle className="w-4 h-4 text-green-600" /> Logged In ({customer.name || customer.email || customer.mobile})
                 </span>
-              ) : (
-                <button
-                  type="button"
-                  onClick={handleOpenOtpModal}
-                  className="text-xs font-bold text-yellow-950 bg-yellow-300 hover:bg-yellow-400 px-3.5 py-1.5 rounded-lg transition shadow-2xs flex items-center gap-1.5"
-                >
-                  ⚡ Verify Mobile via OTP (Required)
-                </button>
               )}
             </div>
 
             {!customer && (
-              <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
-                <div>
-                  <strong className="block text-amber-950 font-bold">🔒 Customer Authentication Gate</strong>
-                  <span>Please verify your mobile number with a quick 6-digit OTP before proceeding to payment. Your selected specifications and artwork files will be 100% preserved.</span>
+              <div className="mb-5 p-4 bg-gradient-to-r from-amber-50/90 via-orange-50/50 to-amber-50/90 border border-amber-200/90 rounded-2xl shadow-xs">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm">⚡</span>
+                      <strong className="text-xs font-black text-amber-950 uppercase tracking-wider">
+                        Express 1-Click Checkout
+                      </strong>
+                    </div>
+                    <p className="text-xs text-gray-600 mt-1">
+                      Sign in with Google to auto-fill your delivery info instantly, or directly enter details below.
+                    </p>
+                  </div>
+                  <div className="w-full sm:w-auto shrink-0">
+                    <GoogleAuthButton
+                      compact
+                      text="Continue with Google"
+                      onSuccess={(cust) => {
+                        if (cust) {
+                          setFormData((prev) => ({
+                            ...prev,
+                            customerName: cust.name || prev.customerName,
+                            customerEmail: cust.email || prev.customerEmail,
+                            customerMobile: cust.mobile || prev.customerMobile,
+                            customerWhatsapp: cust.whatsapp || cust.mobile || prev.customerWhatsapp,
+                            street: cust.address || prev.street,
+                            city: cust.city || prev.city,
+                            pincode: cust.pincode || prev.pincode,
+                            gstNumber: cust.gstNumber || prev.gstNumber,
+                          }));
+                        }
+                      }}
+                    />
+                  </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={handleOpenOtpModal}
-                  className="bg-amber-800 hover:bg-amber-900 text-white font-extrabold px-3 py-1.5 rounded-lg text-xs whitespace-nowrap shadow-xs"
-                >
-                  Verify Now ➔
-                </button>
               </div>
             )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -622,10 +569,11 @@ export default function Checkout() {
             <div className="divide-y max-h-60 overflow-y-auto mb-4">
               {cartItems.map((item) => (
                 <div key={item.cartItemId} className="py-3 flex gap-3 text-sm">
-                  <img
+                  <LazyImage
                     src={item.product?.thumbnailUrl || '/default-image.png'}
                     alt={item.product?.name}
-                    className="w-14 h-14 object-contain p-1 bg-[#f8f9fa] rounded-lg border border-gray-200 flex-shrink-0"
+                    containerClassName="w-14 h-14 rounded-lg bg-[#f8f9fa] border border-gray-200 flex-shrink-0 flex items-center justify-center overflow-hidden"
+                    className="w-full h-full object-contain p-1"
                   />
                   <div className="flex-1">
                     <h4 className="font-semibold text-gray-900 leading-tight">{item.product?.name}</h4>
@@ -791,232 +739,25 @@ export default function Checkout() {
         />
       )}
 
-      {/* Quick Mobile OTP Login Modal */}
-      <Modal show={otpModalOpen} onClose={() => setOtpModalOpen(false)} size="md">
-        <Modal.Header>
-          <div className="flex items-center gap-2">
-            <span className="text-xl">⚡</span>
-            <span className="font-extrabold text-base text-gray-900">Quick Mobile OTP Login</span>
-          </div>
-        </Modal.Header>
-        <Modal.Body>
-          <div className="space-y-4 text-xs">
-            <p className="text-gray-600">
-              Sign in with your 10-digit mobile number to access your saved delivery addresses and bind this order directly to your account.
+      {/* Dedicated Full-Screen Non-Dismissible Order Submission Overlay */}
+      {isSubmitting && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex flex-col items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-8 max-w-md w-full text-center shadow-2xl space-y-4 border border-yellow-300">
+            <div className="w-16 h-16 mx-auto bg-yellow-100 rounded-full flex items-center justify-center text-yellow-600">
+              <Spinner size="xl" />
+            </div>
+            <h3 className="text-xl font-black text-gray-900">
+              Processing Your Print Order...
+            </h3>
+            <p className="text-xs text-gray-600 font-medium">
+              {submitStatusMessage || "Verifying print specifications, generating job cards & connecting to payment gateway..."}
             </p>
-
-            {otpError && (
-              <div className="p-2.5 bg-red-50 border border-red-200 text-red-700 rounded-lg font-semibold">
-                ⚠ {otpError}
-              </div>
-            )}
-
-            <div>
-              <Label value="Mobile Number (10 digits)" className="mb-1 block font-bold" />
-              <div className="flex gap-2">
-                <TextInput
-                  type="tel"
-                  maxLength={10}
-                  value={otpMobile}
-                  onChange={(e) => setOtpMobile(e.target.value.replace(/\D/g, ''))}
-                  placeholder="Enter 10-digit mobile number"
-                  className="flex-1 min-h-[42px]"
-                  disabled={otpSent && otpTimer > 0}
-                />
-                <Button
-                  color="dark"
-                  onClick={handleSendOtp}
-                  disabled={otpLoading || (otpSent && otpTimer > 0) || otpMobile.length < 10}
-                  className="bg-black hover:bg-gray-800 text-white font-bold whitespace-nowrap text-xs"
-                >
-                  {otpLoading ? <Spinner size="xs" /> : otpSent ? (otpTimer > 0 ? `Resend (${otpTimer}s)` : 'Resend') : 'Send OTP'}
-                </Button>
-              </div>
-            </div>
-
-            {otpSent && (
-              <div className="pt-3 border-t space-y-3">
-                <div className="p-2 bg-green-50 border border-green-200 text-green-800 rounded-lg text-xs">
-                  ✔ 6-digit OTP code sent to <strong>+91 {otpMobile}</strong>.
-                </div>
-                <div>
-                  <Label value="Enter 6-Digit OTP Code" className="mb-1 block font-bold" />
-                  <TextInput
-                    type="tel"
-                    maxLength={6}
-                    value={otpCode}
-                    onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ''))}
-                    placeholder="e.g. 123456"
-                    className="text-center font-mono font-bold tracking-widest text-lg min-h-[44px]"
-                  />
-                </div>
-                <Button
-                  onClick={handleVerifyOtp}
-                  disabled={otpLoading || otpCode.length < 6}
-                  className="w-full bg-yellow-400 hover:bg-yellow-500 text-black font-extrabold py-2 text-sm rounded-xl shadow"
-                >
-                  {otpLoading ? <Spinner size="sm" /> : 'Verify & Continue Checkout ➔'}
-                </Button>
-              </div>
-            )}
-          </div>
-        </Modal.Body>
-      </Modal>
-
-      {/* Mandatory Final Order Review Modal */}
-      <Modal show={reviewModalOpen} onClose={() => setReviewModalOpen(false)} size="2xl">
-        <Modal.Header>
-          <div className="flex items-center gap-2">
-            <HiOutlineDocumentText className="w-5 h-5 text-yellow-500" />
-            <span className="font-extrabold text-base sm:text-lg text-gray-900">
-              Confirm Print Order Details
-            </span>
-          </div>
-        </Modal.Header>
-        <Modal.Body>
-          <div className="space-y-4 text-xs">
-            {/* Customer & Fulfillment Summary */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3.5 bg-gray-50 rounded-xl border border-gray-200">
-              <div>
-                <span className="text-[10px] uppercase font-bold text-gray-400 block">Customer Information</span>
-                <p className="font-bold text-gray-900 text-sm mt-0.5">{formData.customerName}</p>
-                <p className="text-gray-600">📱 +91 {formData.customerMobile}</p>
-                <p className="text-gray-600 truncate">✉ {formData.customerEmail}</p>
-                {formData.gstNumber && (
-                  <p className="text-purple-700 font-bold mt-1">GSTIN: {formData.gstNumber}</p>
-                )}
-              </div>
-
-              <div>
-                <span className="text-[10px] uppercase font-bold text-gray-400 block">Delivery Method & Destination</span>
-                <span className={`inline-block text-xs font-bold px-2 py-0.5 rounded mt-1 ${
-                  formData.deliveryMethod === 'STORE_PICKUP' ? 'bg-amber-100 text-amber-900' : 'bg-blue-100 text-blue-900'
-                }`}>
-                  {formData.deliveryMethod === 'STORE_PICKUP' ? '🏪 Direct Store Self-Pickup' : '🚚 Doorstep Courier'}
-                </span>
-                {formData.deliveryMethod === 'STORE_PICKUP' ? (
-                  <p className="text-gray-600 mt-1 leading-snug">
-                    Print Bazzar Press Facility, Singarathope, Trichy - 620008. Free Pickup.
-                  </p>
-                ) : (
-                  <p className="text-gray-600 mt-1 leading-snug">
-                    {formData.street}, {formData.city}, {formData.state} - {formData.pincode}
-                  </p>
-                )}
-              </div>
-            </div>
-
-            {/* Items & Artwork Summary */}
-            <div className="border rounded-xl p-3 divide-y max-h-52 overflow-y-auto">
-              <span className="text-[10px] uppercase font-bold text-gray-400 block pb-1.5">
-                Ordered Products ({cartItems.length})
-              </span>
-              {cartItems.map((item, idx) => (
-                <div key={idx} className="py-2.5 flex justify-between items-start gap-2">
-                  <div>
-                    <h5 className="font-bold text-gray-900 text-xs">{item.product?.name}</h5>
-                    <p className="text-gray-500 text-[11px]">
-                      Qty: <strong>{item.quantity} {item.quantityUnit || 'pcs'}</strong>
-                    </p>
-
-                    {/* Customer-Confirmed Options */}
-                    {item.selectedOptions && (
-                      <div className="flex flex-wrap gap-1 mt-1">
-                        {Object.entries(item.selectedOptions).map(([k, v]) => {
-                          if (k.startsWith('_') || String(v).toLowerCase() === 'no' || String(v).toLowerCase() === 'none') return null;
-                          return (
-                            <span key={k} className="inline-block text-[10px] bg-white border border-gray-200 px-1.5 py-0.5 rounded text-gray-700 font-medium">
-                              <strong className="text-gray-900">{k}:</strong> {String(v)}
-                            </span>
-                          );
-                        })}
-                      </div>
-                    )}
-
-                    {item.artworkOption === 'DESIGN_SUPPORT' ? (
-                      <span className="text-[10px] font-bold text-purple-700 bg-purple-50 px-1.5 py-0.5 rounded border border-purple-200 inline-block mt-1">
-                        🎨 Design Support: {item.designPackageName || 'Custom'} (+₹{item.designFee || 0})
-                      </span>
-                    ) : item.artworkFileName ? (
-                      <div className="flex items-center gap-1.5 mt-1">
-                        <span className="text-[10px] text-green-700 font-semibold truncate max-w-[200px]">
-                          📎 {item.artworkFileName}
-                        </span>
-                        {item.artworkVersion && (
-                          <span className="text-[9px] font-mono font-bold bg-gray-100 px-1 py-0.2 rounded border">
-                            {item.artworkVersion}
-                          </span>
-                        )}
-                        {item.preflightReport?.status === 'PASS' ? (
-                          <span className="text-[9px] text-green-700 font-bold bg-green-50 px-1.5 py-0.2 rounded-full border border-green-200">
-                            ✔ Preflight Pass
-                          </span>
-                        ) : null}
-                      </div>
-                    ) : null}
-                  </div>
-                  <span className="font-bold text-gray-900 text-sm whitespace-nowrap">₹{item.totalPrice}</span>
-                </div>
-              ))}
-            </div>
-
-            {/* Financial Breakdown */}
-            <div className="p-3 bg-gray-50 rounded-xl border space-y-1.5 text-xs">
-              <div className="flex justify-between text-gray-600">
-                <span>Taxable Items Subtotal:</span>
-                <span className="font-bold text-gray-900">₹{cartSubtotal}</span>
-              </div>
-              <div className="flex justify-between text-gray-600">
-                <span>Delivery:</span>
-                <span className="font-bold text-gray-900">
-                  {effectiveShipping === 0 ? <span className="text-green-600">FREE</span> : `₹${effectiveShipping}`}
-                </span>
-              </div>
-              <div className="flex justify-between text-gray-600">
-                <span>GST (18% included):</span>
-                <span className="font-bold text-gray-900">₹{Math.round((cartSubtotal * 18) / 100)}</span>
-              </div>
-              <div className="flex justify-between text-sm font-black text-gray-900 pt-2 border-t">
-                <span>Total Amount:</span>
-                <span className="text-red-600 text-base font-black">₹{effectiveGrandTotal}</span>
-              </div>
-              {isDesignSplitActive && (
-                <div className="p-2 bg-purple-50 rounded-lg border border-purple-200 text-purple-900 mt-2 text-[11px]">
-                  <strong>Two-Stage Milestone:</strong> Pay design fee ₹{initialPayableNow} now. Balance ₹{balanceDueLater} is paid upon your approval of the digital proof.
-                </div>
-              )}
-            </div>
-
-            <div className="flex items-center gap-3 pt-2">
-              <Button
-                color="light"
-                onClick={() => setReviewModalOpen(false)}
-                className="flex-1 font-bold text-xs"
-              >
-                ← Back to Edit
-              </Button>
-              <Button
-                color="dark"
-                onClick={executeOrderPlacement}
-                disabled={isSubmitting}
-                className="flex-1 bg-yellow-400 hover:bg-yellow-500 text-black font-black text-xs py-2 rounded-xl shadow"
-              >
-                {isSubmitting ? (
-                  <div className="flex items-center gap-1.5">
-                    <Spinner size="xs" /> Processing...
-                  </div>
-                ) : formData.paymentMethod === 'CASH' ? (
-                  `Confirm COD Order (₹${effectiveGrandTotal}) ➔`
-                ) : isDesignSplitActive ? (
-                  `Confirm & Pay ₹${initialPayableNow} ➔`
-                ) : (
-                  `Confirm & Pay ₹${effectiveGrandTotal} ➔`
-                )}
-              </Button>
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-[11px] text-amber-900 font-bold">
+              🔒 Please do not refresh, close, or press back while we finalize your order in our press system.
             </div>
           </div>
-        </Modal.Body>
-      </Modal>
+        </div>
+      )}
     </div>
   );
 }

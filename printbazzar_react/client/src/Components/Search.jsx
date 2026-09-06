@@ -173,8 +173,12 @@ const Search = () => {
                         className="flex items-center gap-3 p-2 hover:bg-gray-50 rounded-xl transition-colors group"
                       >
                         <img
-                          src={prod.thumbnailUrl || "/default-image.png"}
+                          src={prod.thumbnailUrl || (prod.images?.[0]?.imageUrl || prod.images?.[0]?.url) || "/default-image.png"}
                           alt={prod.name}
+                          width={40}
+                          height={40}
+                          loading="lazy"
+                          decoding="async"
                           className="w-10 h-10 object-cover rounded-lg border bg-white flex-shrink-0"
                         />
                         <div className="flex-1 min-w-0">

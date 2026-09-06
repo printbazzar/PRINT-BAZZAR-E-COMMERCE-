@@ -1,59 +1,69 @@
 import { Route, Routes, useLocation, Navigate, useParams } from "react-router-dom";
-import { useState, useEffect } from "react";
+import { useState, useEffect, lazy, Suspense } from "react";
 import Home from "./Pages/Home";
 import Header from "./Components/Header";
-import { Category } from "./Pages/Category";
-import Shop from "./Pages/Shop";
-import ProductDetail from "./Pages/ProductDetail";
-import Cart from "./Pages/Cart";
-import Checkout from "./Pages/Checkout";
-import OrderConfirmation from "./Pages/OrderConfirmation";
-import TrackOrder from "./Pages/TrackOrder";
 import FooterCom from "./Components/FooterComp";
 import ScrollToTop from "./Components/ScrollToTop";
 import Whatsapp from "./Components/WhatsappIcon";
-import Contact from "./Pages/Contact";
 import Search from "./Components/Search";
-import Missing from "./Pages/Missing";
-import AboutUs from "./Pages/AboutUs";
-import Preloader from "./Components/Preloader";
 import { CartDrawer } from "./Components/CartDrawer";
 import { CartProvider } from "./context/CartContext";
 import { AuthProvider } from "./context/AuthContext";
 import { CustomerAuthProvider } from "./context/CustomerAuthContext";
 import { BusinessInfoProvider } from "./context/BusinessInfoContext";
-
-import InvoiceView from "./Pages/InvoiceView";
 import MobileBottomNav from "./Components/MobileBottomNav";
 
-// Customer Auth & Portal Pages
-import CustomerLogin from "./Pages/CustomerLogin";
-import CustomerSignup from "./Pages/CustomerSignup";
-import CustomerDashboard from "./Pages/CustomerDashboard";
+// Storefront Pages (Lazy Loaded Chunks)
+const Category = lazy(() => import("./Pages/Category").then((m) => ({ default: m.Category })));
+const Shop = lazy(() => import("./Pages/Shop"));
+const ProductDetail = lazy(() => import("./Pages/ProductDetail"));
+const Cart = lazy(() => import("./Pages/Cart"));
+const Checkout = lazy(() => import("./Pages/Checkout"));
+const OrderConfirmation = lazy(() => import("./Pages/OrderConfirmation"));
+const TrackOrder = lazy(() => import("./Pages/TrackOrder"));
+const Contact = lazy(() => import("./Pages/Contact"));
+const AboutUs = lazy(() => import("./Pages/AboutUs"));
+const Missing = lazy(() => import("./Pages/Missing"));
+const InvoiceView = lazy(() => import("./Pages/InvoiceView"));
+const PolicyPage = lazy(() => import("./Pages/PolicyPage"));
+const QuoteRequestPage = lazy(() => import("./Pages/QuoteRequestPage"));
 
-// Admin Module
-import AdminLayout from "./admin/AdminLayout";
-import AdminLogin from "./admin/AdminLogin";
-import AdminDashboard from "./admin/AdminDashboard";
-import AdminProducts from "./admin/AdminProducts";
-import AdminProductEditor from "./admin/AdminProductEditor";
-import AdminCategories from "./admin/AdminCategories";
-import AdminBanners from "./admin/AdminBanners";
-import AdminOrders from "./admin/AdminOrders";
-import AdminOrderDetail from "./admin/AdminOrderDetail";
-import AdminWorkflowBoard from "./admin/AdminWorkflowBoard";
-import AdminStaffManagement from "./admin/AdminStaffManagement";
-import AdminPriceManagement from "./admin/AdminPriceManagement";
-import AdminDesignServices from "./admin/AdminDesignServices";
-import AdminSettings from "./admin/AdminSettings";
-import AdminFooterSettings from "./admin/AdminFooterSettings";
-import AdminBusinessSettings from "./admin/AdminBusinessSettings";
-import AdminAuditLogs from "./admin/AdminAuditLogs";
-import AdminProductConfigurator from "./admin/AdminProductConfigurator";
-import AdminOptionMasterManager from "./admin/AdminOptionMasterManager";
-import StaffQueue from "./Pages/StaffQueue";
-import PolicyPage from "./Pages/PolicyPage";
-import QuoteRequestPage from "./Pages/QuoteRequestPage";
+// Customer Auth & Portal Pages (Lazy Loaded)
+const CustomerLogin = lazy(() => import("./Pages/CustomerLogin"));
+const CustomerSignup = lazy(() => import("./Pages/CustomerSignup"));
+const CustomerDashboard = lazy(() => import("./Pages/CustomerDashboard"));
+
+// Admin Module (Lazy Loaded Chunks - Separated from Public Storefront Bundle)
+const AdminLayout = lazy(() => import("./admin/AdminLayout"));
+const AdminLogin = lazy(() => import("./admin/AdminLogin"));
+const AdminDashboard = lazy(() => import("./admin/AdminDashboard"));
+const AdminProducts = lazy(() => import("./admin/AdminProducts"));
+const AdminProductEditor = lazy(() => import("./admin/AdminProductEditor"));
+const AdminCategories = lazy(() => import("./admin/AdminCategories"));
+const AdminBanners = lazy(() => import("./admin/AdminBanners"));
+const AdminOrders = lazy(() => import("./admin/AdminOrders"));
+const AdminOrderDetail = lazy(() => import("./admin/AdminOrderDetail"));
+const AdminWorkflowBoard = lazy(() => import("./admin/AdminWorkflowBoard"));
+const AdminStaffManagement = lazy(() => import("./admin/AdminStaffManagement"));
+const AdminPriceManagement = lazy(() => import("./admin/AdminPriceManagement"));
+const AdminDesignServices = lazy(() => import("./admin/AdminDesignServices"));
+const AdminSettings = lazy(() => import("./admin/AdminSettings"));
+const AdminFooterSettings = lazy(() => import("./admin/AdminFooterSettings"));
+const AdminBusinessSettings = lazy(() => import("./admin/AdminBusinessSettings"));
+const AdminAuditLogs = lazy(() => import("./admin/AdminAuditLogs"));
+const AdminProductConfigurator = lazy(() => import("./admin/AdminProductConfigurator"));
+const AdminOptionMasterManager = lazy(() => import("./admin/AdminOptionMasterManager"));
+const StaffQueue = lazy(() => import("./Pages/StaffQueue"));
+
+// Lightweight suspense placeholder for deferred route transitions
+function RouteLoadingFallback() {
+  return (
+    <div className="min-h-[50vh] flex flex-col items-center justify-center py-16">
+      <div className="w-8 h-8 border-3 border-yellow-400 border-t-transparent rounded-full animate-spin"></div>
+      <p className="mt-3 text-xs text-gray-400 font-medium tracking-wide">Loading page...</p>
+    </div>
+  );
+}
 
 // Legacy route redirect component (e.g. /StandardCardDetails -> /product/standard-card)
 function LegacyRouteRedirect({ targetSlug }) {
@@ -136,7 +146,8 @@ function App() {
       <CustomerAuthProvider>
         <AuthProvider>
           <CartProvider>
-            <Routes>
+            <Suspense fallback={<RouteLoadingFallback />}>
+              <Routes>
             {/* ========================================== */}
             {/* ADMIN PORTAL ROUTES */}
             {/* ========================================== */}
@@ -396,8 +407,9 @@ function App() {
               </StorefrontLayout>
             }
           />
-        </Routes>
-          </CartProvider>
+          </Routes>
+        </Suspense>
+      </CartProvider>
         </AuthProvider>
       </CustomerAuthProvider>
     </BusinessInfoProvider>

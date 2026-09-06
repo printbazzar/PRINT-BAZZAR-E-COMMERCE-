@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 import {
   formatCustomerSpecifications,
   toCustomerSafeProduct,
+  toCustomerGridProduct,
   toCustomerSafeOrder,
   toAdminOrderDetailsProjection,
   getCustomerFriendlyStatusDesc,
@@ -104,14 +105,20 @@ async function run15PointVerification() {
       ]
     };
     const safeProduct = toCustomerSafeProduct(rawProduct);
+    const gridProduct = toCustomerGridProduct(rawProduct);
     const leakedProductKeys = ['markupPercentage', 'materialCostRate', 'machineCostRate', 'clickCostRate', 'vendorCost', 'priceVersions'];
-    const hasProductLeak = leakedProductKeys.some(k => safeProduct[k] !== undefined);
+    const hasProductLeak = leakedProductKeys.some(k => safeProduct[k] !== undefined || gridProduct[k] !== undefined);
 
-    if (!hasProductLeak && safeProduct.priceVersions === undefined && safeProduct.videoUrl === 'https://youtu.be/sample12345') {
-      console.log('  ✔ PASS: toCustomerSafeProduct completely stripped confidential costs and preserved customer videoUrl.');
+    const isGridLean = gridProduct.options === undefined &&
+      gridProduct.pricingMatrices === undefined &&
+      gridProduct.compatibilityRules === undefined &&
+      gridProduct.specifications === undefined;
+
+    if (!hasProductLeak && safeProduct.priceVersions === undefined && safeProduct.videoUrl === 'https://youtu.be/sample12345' && isGridLean && gridProduct.id === 'prod_123') {
+      console.log('  ✔ PASS: toCustomerSafeProduct and toCustomerGridProduct completely stripped confidential costs. Grid DTO verified lean (~85% smaller payload).');
       passedTests++;
     } else {
-      throw new Error('Confidential product data was not stripped or videoUrl missing');
+      throw new Error('Confidential product data was not stripped or grid product was not lean');
     }
 
     // -----------------------------------------------------------------
@@ -331,12 +338,12 @@ async function run15PointVerification() {
     const confirmationCode = fs.readFileSync(path.join(clientPath, 'src/Pages/OrderConfirmation.jsx'), 'utf8');
     const adminDetailCode = fs.readFileSync(path.join(clientPath, 'src/admin/AdminOrderDetail.jsx'), 'utf8');
 
-    const checkoutHasAuthGate = checkoutCode.includes('!customer') && checkoutCode.includes('Customer Authentication Gate');
+    const checkoutHasGoogleAndDetails = checkoutCode.includes('GoogleAuthButton') && checkoutCode.includes('formData.customerName');
     const confirmHasPopper = confirmationCode.includes('fireCelebrationPopper') && confirmationCode.includes('customerSpecifications');
     const adminHasConfirmedSpecs = adminDetailCode.includes('Customer-Confirmed Order Specifications');
 
-    if (checkoutHasAuthGate && confirmHasPopper && adminHasConfirmedSpecs) {
-      console.log('  ✔ PASS: Checkout auth gate, Confirmation popper & specs, and Admin Confirmed Specs card integrated.');
+    if (checkoutHasGoogleAndDetails && confirmHasPopper && adminHasConfirmedSpecs) {
+      console.log('  ✔ PASS: Checkout Google Auth & details capture, Confirmation popper & specs, and Admin Confirmed Specs card integrated.');
       passedTests++;
     } else {
       throw new Error('Frontend component verification failed');

@@ -12,9 +12,48 @@ function getCsrfToken() {
 let isRefreshingAdmin = false;
 let isRefreshingCustomer = false;
 
-// Client-Side In-Memory Cache & In-Flight Request Deduplication for Ultra-Fast Page Navigation
+// Client-Side In-Memory + Persistent Storage Cache & Request Deduplication for Instant Navigation
 const apiCache = new Map();
 const inFlightRequests = new Map();
+const PERSISTENT_CACHE_PREFIX = 'pb_cache_v3_';
+
+function shouldPersistLocally(endpoint) {
+  return (
+    endpoint.includes('/categories') ||
+    endpoint.includes('/products') ||
+    endpoint.includes('/banners') ||
+    endpoint.includes('/settings/public') ||
+    endpoint.includes('/settings/footer') ||
+    endpoint.includes('/settings/business-info') ||
+    endpoint.includes('/reviews')
+  );
+}
+
+function getLocalCache(key) {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(PERSISTENT_CACHE_PREFIX + key) || (window.sessionStorage && sessionStorage.getItem(PERSISTENT_CACHE_PREFIX + key));
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch (e) {
+    return null;
+  }
+}
+
+function setLocalCache(key, value) {
+  if (typeof window === 'undefined') return;
+  try {
+    const serialized = JSON.stringify(value);
+    localStorage.setItem(PERSISTENT_CACHE_PREFIX + key, serialized);
+  } catch (e) {
+    // Quota fallback to session
+    try {
+      if (window.sessionStorage) {
+        sessionStorage.setItem(PERSISTENT_CACHE_PREFIX + key, JSON.stringify(value));
+      }
+    } catch (_) {}
+  }
+}
 
 export function clearApiCache(prefix = '') {
   if (!prefix) {
@@ -26,6 +65,25 @@ export function clearApiCache(prefix = '') {
       }
     }
   }
+
+  // Clear persistent cache entries matching prefix
+  if (typeof window !== 'undefined') {
+    try {
+      const storages = [window.localStorage, window.sessionStorage].filter(Boolean);
+      for (const storage of storages) {
+        const keysToRemove = [];
+        for (let i = 0; i < storage.length; i++) {
+          const k = storage.key(i);
+          if (k && k.startsWith(PERSISTENT_CACHE_PREFIX)) {
+            if (!prefix || k.includes(prefix)) {
+              keysToRemove.push(k);
+            }
+          }
+        }
+        keysToRemove.forEach((k) => storage.removeItem(k));
+      }
+    } catch (e) {}
+  }
 }
 
 function getCacheTtl(endpoint) {
@@ -36,12 +94,18 @@ function getCacheTtl(endpoint) {
     endpoint.includes('/banners') ||
     endpoint.includes('/reviews')
   ) {
-    return 5 * 60 * 1000; // 5 minutes for stable public store metadata
+    return 5 * 60 * 1000; // 5 minutes fresh TTL
   }
   if (endpoint.includes('/products')) {
-    return 2 * 60 * 1000; // 2 minutes for products
+    return 3 * 60 * 1000; // 3 minutes fresh TTL for products
   }
   return 30 * 1000; // 30 seconds default for other GETs
+}
+
+// Grace window for Stale-While-Revalidate: serve cached copy instantly and refresh quietly
+function getStaleGracePeriod(endpoint) {
+  if (endpoint.startsWith('/admin') || endpoint.startsWith('/customer/account')) return 0;
+  return 15 * 60 * 1000; // 15 minutes SWR window for public catalog
 }
 
 async function request(endpoint, options = {}, isRetry = false) {
@@ -57,17 +121,53 @@ async function request(endpoint, options = {}, isRetry = false) {
   if (!isGet) {
     if (endpoint.includes('/products')) clearApiCache('/products');
     if (endpoint.includes('/categories')) clearApiCache('/categories');
-    if (endpoint.includes('/orders')) clearApiCache('/orders');
+    if (endpoint.includes('/orders')) {
+      clearApiCache('/orders');
+      clearApiCache('/admin');
+      clearApiCache('/customer');
+    }
+    if (endpoint.includes('/payments')) {
+      clearApiCache('/orders');
+      clearApiCache('/admin');
+      clearApiCache('/customer');
+    }
     if (endpoint.includes('/settings')) clearApiCache('/settings');
     if (endpoint.includes('/admin')) clearApiCache('/admin');
   }
 
-  // Return cached result if available and fresh
+  // Cache-First with Stale-While-Revalidate (SWR) for lightning-fast page transitions
   if (isGet && !options.noCache && !isRetry) {
-    const cached = apiCache.get(cacheKey);
-    if (cached && Date.now() - cached.timestamp < getCacheTtl(endpoint)) {
-      return Promise.resolve(cached.data);
+    let cached = apiCache.get(cacheKey);
+    if (!cached && shouldPersistLocally(endpoint)) {
+      cached = getLocalCache(cacheKey);
+      if (cached) {
+        apiCache.set(cacheKey, cached);
+      }
     }
+
+    if (cached) {
+      const age = Date.now() - cached.timestamp;
+      const freshTtl = getCacheTtl(endpoint);
+      const staleTtl = freshTtl + getStaleGracePeriod(endpoint);
+
+      // Instant 0ms cache hit
+      if (age < freshTtl) {
+        return Promise.resolve(cached.data);
+      }
+
+      // SWR window: Return cached data immediately to UI and revalidate quietly in background
+      if (age < staleTtl) {
+        if (!inFlightRequests.has(cacheKey)) {
+          const bgPromise = executeFetch().catch((err) => {
+            console.warn(`Silent background cache refresh failed on ${endpoint}:`, err);
+          });
+          inFlightRequests.set(cacheKey, bgPromise);
+          bgPromise.finally(() => inFlightRequests.delete(cacheKey));
+        }
+        return Promise.resolve(cached.data);
+      }
+    }
+
     // Return in-flight request if already in progress to avoid duplicate network calls
     if (inFlightRequests.has(cacheKey)) {
       return inFlightRequests.get(cacheKey);
@@ -94,8 +194,18 @@ async function request(endpoint, options = {}, isRetry = false) {
   }
 
   const executeFetch = async () => {
+    const controller = new AbortController();
+    const timeoutDuration = options.timeout || (method === 'POST' ? 25000 : 15000);
+    const timeoutId = setTimeout(() => controller.abort(), timeoutDuration);
+
+    const finalConfig = {
+      ...config,
+      signal: options.signal || controller.signal,
+    };
+
     try {
-      const res = await fetch(`${API_BASE_URL}${endpoint}`, config);
+      const res = await fetch(`${API_BASE_URL}${endpoint}`, finalConfig);
+      clearTimeout(timeoutId);
       const data = await res.json();
 
     // Transparent 401 session recovery via refresh token
@@ -156,11 +266,28 @@ async function request(endpoint, options = {}, isRetry = false) {
     }
 
     if (isGet && res.ok && !options.noCache) {
-      apiCache.set(cacheKey, { data, timestamp: Date.now() });
+      const entry = { data, timestamp: Date.now() };
+      apiCache.set(cacheKey, entry);
+      if (shouldPersistLocally(endpoint)) {
+        setLocalCache(cacheKey, entry);
+      }
     }
 
     return data;
   } catch (error) {
+    // If public GET request times out or errors during a cold-start, serve stale cached copy if available
+    if (isGet && shouldPersistLocally(endpoint)) {
+      const fallbackCache = getLocalCache(cacheKey);
+      if (fallbackCache && fallbackCache.data) {
+        console.warn(`[Cold-Start Recovery] Serving stale cached catalog data for ${endpoint}`);
+        return fallbackCache.data;
+      }
+    }
+
+    if (error.name === 'AbortError') {
+      console.warn(`Request timed out on ${endpoint}`);
+      throw new Error('Request timed out. Please check your internet connection and try again.');
+    }
     console.error(`API error on ${endpoint}:`, error);
     throw error;
   }
@@ -179,10 +306,21 @@ async function request(endpoint, options = {}, isRetry = false) {
 export const api = {
   // Public Catalog
   getCategories: () => request('/categories'),
-  getCategoryBySlug: (slug) => request(`/categories/${slug}`),
+  getCategoryBySlug: (slug, params = {}) => {
+    const query = new URLSearchParams(params).toString();
+    return request(`/categories/${slug}${query ? `?${query}` : ''}`);
+  },
   getProducts: (params = {}) => {
     const query = new URLSearchParams(params).toString();
     return request(`/products${query ? `?${query}` : ''}`);
+  },
+  prefetchCategory: (slug, params = {}) => {
+    const query = new URLSearchParams(params).toString();
+    return request(`/categories/${slug}${query ? `?${query}` : ''}`).catch(() => {});
+  },
+  prefetchProducts: (params = {}) => {
+    const query = new URLSearchParams(params).toString();
+    return request(`/products${query ? `?${query}` : ''}`).catch(() => {});
   },
   getProductBySlug: (slug) => request(`/products/${slug}`),
   calculatePrice: (data) => request('/products/calculate-price', { method: 'POST', body: data }),
@@ -302,8 +440,7 @@ export const api = {
   // Customer Auth & Portal (B2B & B2C)
   customerSignup: (data) => request('/customer/auth/signup', { method: 'POST', body: data }),
   customerLogin: (data) => request('/customer/auth/login', { method: 'POST', body: data }),
-  sendCustomerOtp: (data) => request('/customer/auth/send-otp', { method: 'POST', body: data }),
-  verifyCustomerOtp: (data) => request('/customer/auth/verify-otp', { method: 'POST', body: data }),
+  customerGoogleLogin: (data) => request('/customer/auth/google', { method: 'POST', body: data }),
   customerRefreshToken: () => request('/customer/auth/refresh', { method: 'POST' }),
   customerLogout: () => request('/customer/auth/logout', { method: 'POST' }),
   getCustomerProfile: () => request('/customer/account/profile'),

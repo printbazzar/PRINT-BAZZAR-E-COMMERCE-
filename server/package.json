@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "node src/server.js",
     "start": "node src/server.js",
+    "test": "node --test tests/checkout-google.test.js",
     "db:push": "prisma db push",
     "db:generate": "prisma generate",
     "db:seed": "node src/scripts/seedMigratedData.js"

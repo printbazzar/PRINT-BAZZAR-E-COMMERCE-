@@ -42,7 +42,7 @@ export const getDashboardKPIs = async (req, res) => {
     ] = await Promise.all([
       prisma.order.count(),
       prisma.order.count({ where: { createdAt: { gte: today } } }),
-      prisma.order.count({ where: { orderStatus: { in: ['ORDER_RECEIVED', 'CONFIRMED'] } } }),
+      prisma.order.count({ where: { orderStatus: { in: ['ORDER_RECEIVED', 'CONFIRMED', 'Processing', 'PROCESSING', 'PAYMENT_PENDING'] } } }),
       prisma.order.count({ where: { orderStatus: { in: ['PRODUCTION_QUEUE', 'PRINTING', 'FINISHING', 'QC'] } } }),
       prisma.order.count({ where: { orderStatus: 'DELIVERED' } }),
       prisma.order.findMany({ select: { grandTotal: true, createdAt: true, paymentStatus: true } }),
@@ -888,7 +888,15 @@ export const getAdminOrders = async (req, res) => {
       ];
     }
 
-    if (status && status !== 'ALL') where.orderStatus = status;
+    if (status && status !== 'ALL') {
+      const statusVariants = [
+        status,
+        status.toUpperCase(),
+        status.toLowerCase(),
+        status.charAt(0).toUpperCase() + status.slice(1).toLowerCase(),
+      ];
+      where.orderStatus = { in: Array.from(new Set(statusVariants)) };
+    }
     if (paymentStatus && paymentStatus !== 'ALL') where.paymentStatus = paymentStatus;
 
     const take = parseInt(limit, 10) || 50;

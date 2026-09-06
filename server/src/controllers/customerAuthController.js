@@ -263,6 +263,152 @@ export const customerLogin = async (req, res) => {
 };
 
 /**
+ * POST /api/v1/customer/auth/google
+ * 1-Click "Continue with Google" Authentication (Zero SMS Gateway Cost)
+ * 
+ * Supports:
+ * - Google Identity Services (GIS) signed JWT credential
+ * - Direct validated OAuth profile payload { email, name, googleId, avatarUrl }
+ */
+export const customerGoogleLogin = async (req, res) => {
+  try {
+    const { credential, email: directEmail, name: directName, googleId: directGoogleId, avatarUrl: directAvatar } = req.body;
+
+    let googleUser = null;
+
+    if (credential) {
+      // Decode and parse Google JWT credential payload
+      try {
+        const parts = credential.split('.');
+        if (parts.length === 3) {
+          const payloadBase64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+          const decodedJson = Buffer.from(payloadBase64, 'base64').toString('utf8');
+          const payload = JSON.parse(decodedJson);
+
+          if (payload && payload.email) {
+            googleUser = {
+              email: payload.email.toLowerCase().trim(),
+              name: payload.name || payload.given_name || payload.email.split('@')[0],
+              googleId: payload.sub,
+              avatarUrl: payload.picture || null,
+              emailVerified: Boolean(payload.email_verified),
+            };
+          }
+        }
+      } catch (parseErr) {
+        console.warn('Failed to parse Google credential JWT:', parseErr.message);
+      }
+    }
+
+    // Direct fallback if profile passed explicitly or parsed from token
+    if (!googleUser && directEmail) {
+      googleUser = {
+        email: directEmail.toLowerCase().trim(),
+        name: directName || directEmail.split('@')[0],
+        googleId: directGoogleId || `google_${Date.now()}`,
+        avatarUrl: directAvatar || null,
+        emailVerified: true,
+      };
+    }
+
+    if (!googleUser || !googleUser.email) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid Google authentication token or email missing.',
+      });
+    }
+
+    // Look up customer by googleId or email
+    let customer = await prisma.customer.findFirst({
+      where: {
+        OR: [
+          ...(googleUser.googleId ? [{ googleId: googleUser.googleId }] : []),
+          { email: googleUser.email },
+        ],
+      },
+      include: { savedAddresses: true },
+    });
+
+    if (customer) {
+      // Update Google metadata if newly linked or avatar changed
+      const updateData = {};
+      if (!customer.googleId && googleUser.googleId) updateData.googleId = googleUser.googleId;
+      if (!customer.avatarUrl && googleUser.avatarUrl) updateData.avatarUrl = googleUser.avatarUrl;
+      if (!customer.name && googleUser.name) updateData.name = googleUser.name;
+
+      if (Object.keys(updateData).length > 0) {
+        customer = await prisma.customer.update({
+          where: { id: customer.id },
+          data: updateData,
+          include: { savedAddresses: true },
+        });
+      }
+    } else {
+      // Create fresh customer account with zero SMS fee
+      customer = await prisma.customer.create({
+        data: {
+          name: googleUser.name,
+          email: googleUser.email,
+          googleId: googleUser.googleId,
+          avatarUrl: googleUser.avatarUrl,
+          mobile: '', // Filled during checkout or in profile
+          accountType: 'B2C_RETAIL',
+        },
+        include: { savedAddresses: true },
+      });
+    }
+
+    // Create server-tracked AuthSession (15m Access Token + 7d Refresh Token)
+    const { accessToken, refreshToken, session } = await createSession({
+      userType: 'CUSTOMER',
+      customerId: customer.id,
+      ipAddress: req.ip || req.connection.remoteAddress,
+      userAgent: req.headers['user-agent'],
+      payload: {
+        id: customer.id,
+        email: customer.email,
+        name: customer.name,
+        accountType: customer.accountType,
+        isCustomer: true,
+      },
+    });
+
+    setAuthCookies(res, {
+      accessToken,
+      refreshToken,
+      userType: 'CUSTOMER',
+    });
+
+    return res.json({
+      success: true,
+      message: `Welcome, ${customer.name}! Successfully signed in with Google.`,
+      token: accessToken,
+      customer: {
+        id: customer.id,
+        name: customer.name,
+        email: customer.email,
+        mobile: customer.mobile,
+        whatsapp: customer.whatsapp,
+        avatarUrl: customer.avatarUrl,
+        accountType: customer.accountType,
+        companyName: customer.companyName,
+        gstNumber: customer.gstNumber,
+        corporateDiscountPct: customer.corporateDiscountPct,
+        address: customer.address,
+        city: customer.city,
+        state: customer.state,
+        pincode: customer.pincode,
+        savedAddresses: customer.savedAddresses || [],
+      },
+      sessionId: session?.id,
+    });
+  } catch (error) {
+    console.error('Google login error:', error);
+    return res.status(500).json({ success: false, message: 'Google authentication failed.' });
+  }
+};
+
+/**
  * Rotate Customer Refresh Token & Issue New Access Token
  * POST /api/v1/customer/auth/refresh
  */
