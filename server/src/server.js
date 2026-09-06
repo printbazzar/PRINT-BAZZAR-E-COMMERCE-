@@ -56,8 +56,19 @@ app.use(cors(corsOptions));
 // 3. Secure Cookie Parser (HttpOnly auth & session management)
 app.use(cookieParser());
 
-// 4. Body Parsers with payload limits
-app.use(express.json({ limit: '50mb' }));
+// 4. Body Parsers with payload limits & pristine raw body capture for webhook signature verification
+app.use(
+  express.json({
+    limit: '50mb',
+    verify: (req, res, buf) => {
+      // Preserve pristine raw body string & buffer for HMAC signature verification
+      if (req.originalUrl && req.originalUrl.includes('/payments/webhook')) {
+        req.rawBody = buf.toString('utf8');
+        req.rawBodyBuffer = buf;
+      }
+    },
+  })
+);
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // 5. Input Sanitization (strips script injection and dangerous tags)

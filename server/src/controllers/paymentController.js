@@ -545,13 +545,26 @@ export const handlePaymentWebhook = async (req, res) => {
   try {
     const signature = req.headers['x-razorpay-signature'];
     const config = await getGatewayConfig();
+    const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET || config.keySecret;
 
-    if (config.keySecret && signature) {
-      const shasum = crypto.createHmac('sha256', config.keySecret);
-      shasum.update(typeof req.body === 'string' ? req.body : JSON.stringify(req.body));
-      const digest = shasum.digest('hex');
-      if (digest !== signature) {
-        console.warn('[WEBHOOK SECURITY] Invalid webhook signature detected');
+    // 1. Strict Cryptographic Signature Verification
+    if (webhookSecret) {
+      if (!signature) {
+        console.warn('[WEBHOOK SECURITY] Rejected webhook: Missing x-razorpay-signature header');
+        return res.status(400).json({ success: false, message: 'Missing x-razorpay-signature header' });
+      }
+
+      const rawPayload = req.rawBody || (typeof req.body === 'string' ? req.body : JSON.stringify(req.body));
+      const expectedSignature = crypto
+        .createHmac('sha256', webhookSecret)
+        .update(rawPayload)
+        .digest('hex');
+
+      const expectedBuf = Buffer.from(expectedSignature, 'utf8');
+      const signatureBuf = Buffer.from(signature, 'utf8');
+
+      if (expectedBuf.length !== signatureBuf.length || !crypto.timingSafeEqual(expectedBuf, signatureBuf)) {
+        console.warn('[WEBHOOK SECURITY] Rejected webhook: Invalid cryptographic signature');
         return res.status(400).json({ success: false, message: 'Invalid webhook signature' });
       }
     }
@@ -559,100 +572,175 @@ export const handlePaymentWebhook = async (req, res) => {
     const event = req.body?.event;
     const payload = req.body?.payload;
 
+    // 2. Handle Payment Success Events (payment.captured / order.paid)
     if (event === 'payment.captured' || event === 'order.paid') {
       const paymentEntity = payload?.payment?.entity || {};
       const orderEntity = payload?.order?.entity || {};
-      const orderNumber = paymentEntity.notes?.orderNumber || orderEntity.notes?.orderNumber;
+      const orderNumber =
+        paymentEntity.notes?.orderNumber ||
+        orderEntity.notes?.orderNumber ||
+        paymentEntity.notes?.order_number ||
+        orderEntity.notes?.order_number ||
+        orderEntity.receipt;
+
+      if (!orderNumber) {
+        return res.json({ status: 'ok', received: true, note: 'Event processed (No order reference in payload)' });
+      }
+
+      const order = await prisma.order.findUnique({
+        where: { orderNumber: String(orderNumber).trim() },
+        include: { items: true, productionJobs: true, payments: true, invoices: true },
+      });
+
+      if (!order) {
+        console.warn(`[WEBHOOK] Order ${orderNumber} not found in database.`);
+        return res.status(404).json({ success: false, message: `Order ${orderNumber} not found` });
+      }
+
+      const paymentId = paymentEntity.id || `webhook_${Date.now()}`;
+      const amountPaid = paymentEntity.amount ? paymentEntity.amount / 100 : order.grandTotal;
+
+      // 3. Idempotency Check: Protect against duplicate webhooks and concurrent client redirects
+      const alreadyCaptured = order.payments?.some(
+        (p) => p.transactionId === paymentId && p.status === 'SUCCESS'
+      );
+
+      if (alreadyCaptured || (order.paymentStatus === 'CONFIRMED' && order.payments?.some((p) => p.status === 'SUCCESS'))) {
+        console.log(`[WEBHOOK IDEMPOTENT] Order ${order.orderNumber} already confirmed or payment ${paymentId} already captured. Skipping duplicate.`);
+        return res.json({ status: 'ok', received: true, isDuplicate: true });
+      }
+
+      // 4. Atomic Multi-Entity State Reconciliation
+      await prisma.$transaction(async (tx) => {
+        await tx.order.update({
+          where: { id: order.id },
+          data: {
+            paymentStatus: 'CONFIRMED',
+            orderStatus: 'PRODUCTION_QUEUE',
+            currentDepartment: 'PRODUCTION',
+            assignedStaffName: 'Press Supervisor',
+            proofStatus: 'APPROVED',
+            proofApprovedAt: new Date(),
+          },
+        });
+
+        await tx.payment.create({
+          data: {
+            orderId: order.id,
+            amount: amountPaid,
+            status: 'SUCCESS',
+            paymentMethod: paymentEntity.method ? paymentEntity.method.toUpperCase() : 'ONLINE_WEBHOOK',
+            transactionId: paymentId,
+            paymentMetadata: JSON.stringify({
+              source: 'WEBHOOK',
+              event,
+              gatewayOrderId: paymentEntity.order_id,
+              verifiedAt: new Date().toISOString(),
+            }),
+          },
+        });
+
+        await tx.orderStatusHistory.create({
+          data: {
+            orderId: order.id,
+            previousStatus: order.orderStatus,
+            newStatus: 'PRODUCTION_QUEUE',
+            note: `Payment of ₹${amountPaid} verified asynchronously via Webhook (${paymentId}). Released to Press Production.`,
+            customerNote: 'Your payment was successfully verified. Your order is confirmed and queued for printing!',
+            changedByUserId: null,
+          },
+        });
+
+        for (const job of order.productionJobs) {
+          await tx.productionJob.update({
+            where: { id: job.id },
+            data: { status: 'QUEUED', artworkStatus: 'APPROVED' },
+          });
+        }
+
+        await tx.invoice.updateMany({
+          where: { orderId: order.id },
+          data: {
+            paymentStatus: 'PAID',
+            amountPaid,
+            balanceDue: 0,
+            transactionReference: paymentId,
+          },
+        });
+
+        await tx.auditLog.create({
+          data: {
+            action: 'PAYMENT_WEBHOOK_VERIFIED',
+            entityName: 'ORDER',
+            entityId: order.id,
+            newValues: JSON.stringify({
+              orderNumber: order.orderNumber,
+              amountPaid,
+              paymentId,
+              event,
+            }),
+          },
+        });
+      });
+
+      console.log(`[WEBHOOK SUCCESS] Order ${order.orderNumber} successfully confirmed via webhook event (${event})`);
+
+      // Trigger customer notification safely in background
+      sendOrderNotification({
+        order: { ...order, orderStatus: 'PRODUCTION_QUEUE', paymentStatus: 'CONFIRMED' },
+        eventType: 'ORDER_CONFIRMED',
+      }).catch((err) => console.error('[WEBHOOK NOTIFICATION FAILED]', err.message));
+
+      return res.json({ status: 'ok', received: true, orderNumber: order.orderNumber, paymentId });
+    }
+
+    // 5. Handle Payment Failed Events (payment.failed)
+    if (event === 'payment.failed') {
+      const paymentEntity = payload?.payment?.entity || {};
+      const orderNumber = paymentEntity.notes?.orderNumber;
 
       if (orderNumber) {
         const order = await prisma.order.findUnique({
-          where: { orderNumber: orderNumber.trim() },
-          include: { items: true, productionJobs: true, payments: true },
+          where: { orderNumber: String(orderNumber).trim() },
+          include: { payments: true },
         });
 
+        // Only record failed attempt if order is NOT already confirmed
         if (order && order.paymentStatus !== 'CONFIRMED') {
-          const paymentId = paymentEntity.id || `webhook_${Date.now()}`;
-          const amountPaid = paymentEntity.amount ? paymentEntity.amount / 100 : order.grandTotal;
+          const paymentId = paymentEntity.id || `failed_${Date.now()}`;
+          const errDesc = paymentEntity.error_description || 'Payment gateway card/UPI transaction failed.';
 
-          await prisma.$transaction(async (tx) => {
-            await tx.order.update({
-              where: { id: order.id },
-              data: {
-                paymentStatus: 'CONFIRMED',
-                orderStatus: 'PRODUCTION_QUEUE',
-                currentDepartment: 'PRODUCTION',
-                assignedStaffName: 'Press Supervisor',
-                proofStatus: 'APPROVED',
-                proofApprovedAt: new Date(),
-              },
-            });
-
-            await tx.payment.create({
-              data: {
-                orderId: order.id,
-                amount: amountPaid,
-                status: 'SUCCESS',
-                paymentMethod: paymentEntity.method ? paymentEntity.method.toUpperCase() : 'ONLINE_WEBHOOK',
-                transactionId: paymentId,
-                paymentMetadata: JSON.stringify({
-                  source: 'WEBHOOK',
-                  event,
-                  verifiedAt: new Date().toISOString(),
-                }),
-              },
-            });
-
-            await tx.orderStatusHistory.create({
-              data: {
-                orderId: order.id,
-                previousStatus: order.orderStatus,
-                newStatus: 'PRODUCTION_QUEUE',
-                note: `Payment of ₹${amountPaid} verified asynchronously via Webhook (${paymentId}). Released to Press Production.`,
-                customerNote: 'Your payment was successfully verified. Your order is confirmed and queued for printing!',
-              },
-            });
-
-            for (const job of order.productionJobs) {
-              await tx.productionJob.update({
-                where: { id: job.id },
-                data: { status: 'QUEUED', artworkStatus: 'APPROVED' },
-              });
-            }
-
-            await tx.invoice.updateMany({
-              where: { orderId: order.id },
-              data: {
-                paymentStatus: 'PAID',
-                amountPaid,
-                balanceDue: 0,
-                transactionReference: paymentId,
-              },
-            });
-
-            await tx.auditLog.create({
-              data: {
-                action: 'PAYMENT_WEBHOOK_VERIFIED',
-                entityName: 'ORDER',
-                entityId: order.id,
-                newValues: JSON.stringify({
-                  orderNumber: order.orderNumber,
-                  amountPaid,
-                  paymentId,
-                  event,
-                }),
-              },
-            });
+          await prisma.payment.create({
+            data: {
+              orderId: order.id,
+              amount: paymentEntity.amount ? paymentEntity.amount / 100 : order.grandTotal,
+              status: 'FAILED',
+              paymentMethod: paymentEntity.method ? paymentEntity.method.toUpperCase() : 'ONLINE_WEBHOOK',
+              transactionId: paymentId,
+              paymentMetadata: JSON.stringify({
+                source: 'WEBHOOK',
+                event,
+                error: paymentEntity.error_code,
+                description: errDesc,
+              }),
+            },
           });
 
-          sendOrderNotification({
-            order: { ...order, orderStatus: 'PRODUCTION_QUEUE', paymentStatus: 'CONFIRMED' },
-            eventType: 'ORDER_CONFIRMED',
-          }).catch((err) => console.error('[WEBHOOK NOTIFICATION FAILED]', err.message));
+          await prisma.orderStatusHistory.create({
+            data: {
+              orderId: order.id,
+              previousStatus: order.orderStatus,
+              newStatus: order.orderStatus,
+              note: `Online payment attempt failed: ${errDesc} (${paymentId})`,
+              customerNote: 'Online payment attempt was declined. You can retry payment or choose Cash on Delivery.',
+            },
+          });
         }
       }
+      return res.json({ status: 'ok', received: true, event: 'payment.failed' });
     }
 
-    return res.json({ status: 'ok', received: true });
+    return res.json({ status: 'ok', received: true, unhandledEvent: event || 'none' });
   } catch (webhookErr) {
     console.error('Payment webhook error:', webhookErr);
     return res.status(500).json({ success: false, message: 'Webhook processing error' });

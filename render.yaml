@@ -7,6 +7,7 @@ services:
     rootDir: server
     buildCommand: npm install && npx prisma generate
     startCommand: node src/server.js
+    healthCheckPath: /api/health
     envVars:
       - key: NODE_ENV
         value: production
@@ -27,4 +28,6 @@ services:
       - key: RAZORPAY_KEY_ID
         sync: false
       - key: RAZORPAY_KEY_SECRET
+        sync: false
+      - key: RAZORPAY_WEBHOOK_SECRET
         sync: false

@@ -56,6 +56,10 @@ export const deepSanitize = (data) => {
  * Global Express Middleware to automatically sanitize all incoming body payloads
  */
 export const sanitizeRequestBody = (req, res, next) => {
+  // Cryptographic webhooks are verified via HMAC and must never have their raw payloads mutated
+  if (req.originalUrl && req.originalUrl.includes('/payments/webhook')) {
+    return next();
+  }
   if (req.body && typeof req.body === 'object') {
     req.body = deepSanitize(req.body);
   }
