@@ -1,6 +1,6 @@
 import React, { useRef } from 'react';
 import { Modal, Button, Badge } from 'flowbite-react';
-import { HiOutlinePrinter, HiOutlinePhotograph, HiOutlineExternalLink } from 'react-icons/hi';
+import { HiOutlinePrinter, HiOutlinePhotograph, HiOutlineExternalLink, HiOutlineUser, HiOutlinePhone, HiOutlineCreditCard } from 'react-icons/hi';
 
 export default function JobCardModal({ show, onClose, order, job = null }) {
   const printRef = useRef(null);
@@ -16,6 +16,12 @@ export default function JobCardModal({ show, onClose, order, job = null }) {
   const items = order.items || [];
   const primaryItem = items[0] || {};
 
+  // Financial details
+  const invoice = order.invoices?.[0] || {};
+  const paymentStatus = order.paymentStatus || invoice.paymentStatus || 'PENDING';
+  const amountPaid = invoice.amountPaid !== undefined ? invoice.amountPaid : (paymentStatus === 'CONFIRMED' || paymentStatus === 'PAID' ? order.grandTotal : 0);
+  const balanceDue = invoice.balanceDue !== undefined ? invoice.balanceDue : (paymentStatus === 'CONFIRMED' || paymentStatus === 'PAID' ? 0 : order.grandTotal);
+
   // Parse specifications
   let parsedOptions = {};
   try {
@@ -25,7 +31,7 @@ export default function JobCardModal({ show, onClose, order, job = null }) {
           ? JSON.parse(primaryItem.selectedOptionsJson)
           : primaryItem.selectedOptionsJson;
     } else if (primaryItem.selectedOptions) {
-      parsedOptions = primaryItem.selectedOptions;
+      parsedOptions = typeof primaryItem.selectedOptions === 'string' ? JSON.parse(primaryItem.selectedOptions) : primaryItem.selectedOptions;
     }
   } catch (_) {}
 
@@ -38,15 +44,15 @@ export default function JobCardModal({ show, onClose, order, job = null }) {
   const isUrgent = order.deliveryType === 'SAME_DAY' || currentJob.priority === 'URGENT' || currentJob.priority === 'HIGH';
 
   return (
-    <Modal show={show} onClose={onClose} size="3xl">
+    <Modal show={show} onClose={onClose} size="4xl">
       <Modal.Header className="print:hidden">
-        <span className="font-bold text-gray-900">🖨️ Factory Production Job Card — {jobNumber}</span>
+        <span className="font-bold text-gray-900">🖨️ Production Job Card — {jobNumber}</span>
       </Modal.Header>
       <Modal.Body className="p-4 sm:p-6 print:p-0">
         {/* Printable Production Ticket (Clean A4 / A5 layout) */}
         <div
           ref={printRef}
-          className="max-w-[700px] mx-auto bg-white border-2 border-black p-6 text-black font-sans shadow-xs print:border-2 print:border-black print:shadow-none print:max-w-none print:w-full print:p-4"
+          className="max-w-[780px] mx-auto bg-white border-2 border-black p-6 text-black font-sans shadow-xs print:border-2 print:border-black print:shadow-none print:max-w-none print:w-full print:p-4"
         >
           {/* Header Banner */}
           <div className="border-b-2 border-black pb-3 mb-4 flex justify-between items-start">
@@ -54,11 +60,11 @@ export default function JobCardModal({ show, onClose, order, job = null }) {
               <div className="flex items-center gap-2">
                 <h1 className="text-xl font-black uppercase tracking-tight">PRINT BAZZAR</h1>
                 <span className="px-2 py-0.5 bg-black text-white text-[10px] font-black uppercase rounded">
-                  Press Job Ticket
+                  Official Press Job Ticket
                 </span>
               </div>
               <p className="text-xs text-gray-600 font-semibold mt-0.5">
-                Digital & Offset Production Division — Trichy Press
+                Digital & Offset Manufacturing Division — Trichy Facility
               </p>
             </div>
 
@@ -77,7 +83,7 @@ export default function JobCardModal({ show, onClose, order, job = null }) {
           </div>
 
           {/* Job & Order Identifiers Grid */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-gray-100 p-3 rounded-lg border border-gray-300 mb-4 font-mono text-xs">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-gray-100 p-3 rounded-lg border border-gray-300 mb-3 font-mono text-xs">
             <div>
               <span className="text-[10px] font-sans text-gray-500 uppercase block font-bold">Job Card Number</span>
               <span className="font-black text-sm text-blue-700">{jobNumber}</span>
@@ -87,14 +93,8 @@ export default function JobCardModal({ show, onClose, order, job = null }) {
               <span className="font-black text-sm">{order.orderNumber}</span>
             </div>
             <div>
-              <span className="text-[10px] font-sans text-gray-500 uppercase block font-bold">Date Received</span>
-              <span className="font-bold">
-                {new Date(order.createdAt || Date.now()).toLocaleDateString('en-IN', {
-                  day: '2-digit',
-                  month: 'short',
-                  year: 'numeric',
-                })}
-              </span>
+              <span className="text-[10px] font-sans text-gray-500 uppercase block font-bold">Assigned Department</span>
+              <span className="font-black text-xs text-purple-700">{order.currentDepartment || 'PRODUCTION'}</span>
             </div>
             <div>
               <span className="text-[10px] font-sans text-gray-500 uppercase block font-bold">Target Due Date</span>
@@ -103,22 +103,60 @@ export default function JobCardModal({ show, onClose, order, job = null }) {
                   ? new Date(order.estimatedDeliveryDate).toLocaleDateString('en-IN', {
                       day: '2-digit',
                       month: 'short',
+                      year: 'numeric',
                     })
-                  : 'Same / Next Day'}
+                  : 'Standard Dispatch'}
               </span>
             </div>
           </div>
 
+          {/* Customer & Financial Status Strip (Strict Rule #6) */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 bg-blue-50/60 border border-blue-200 rounded-lg mb-4 text-xs">
+            {/* Customer Details */}
+            <div className="space-y-1">
+              <span className="text-[10px] font-black uppercase tracking-wider text-blue-800 block">Customer Information</span>
+              <p className="font-black text-gray-900 text-sm">{order.customerName}</p>
+              <p className="font-mono text-gray-700">Phone: <span className="font-bold">{order.customerMobile}</span></p>
+              {order.customerEmail && <p className="text-gray-500 text-[11px] truncate">Email: {order.customerEmail}</p>}
+            </div>
+
+            {/* Payment & Workflow Status */}
+            <div className="space-y-1 sm:text-right">
+              <span className="text-[10px] font-black uppercase tracking-wider text-blue-800 block">Financial & Order Status</span>
+              <div className="flex items-center sm:justify-end gap-2">
+                <span className="text-[11px] font-bold text-gray-600">Payment:</span>
+                <span
+                  className={`px-2 py-0.5 rounded text-[11px] font-black uppercase ${
+                    paymentStatus === 'CONFIRMED' || paymentStatus === 'PAID'
+                      ? 'bg-green-100 text-green-800 border border-green-300'
+                      : paymentStatus === 'PARTIALLY_PAID'
+                      ? 'bg-yellow-100 text-yellow-800 border border-yellow-300'
+                      : 'bg-red-100 text-red-800 border border-red-300'
+                  }`}
+                >
+                  {paymentStatus}
+                </span>
+              </div>
+              <p className="font-mono text-gray-800 text-[11px]">
+                Paid: <span className="font-bold text-green-700">₹{amountPaid}</span> | Balance Due: <span className="font-black text-red-600">₹{balanceDue}</span>
+              </p>
+              <p className="text-[11px] text-gray-600">
+                Order Status: <span className="font-black text-black">{order.orderStatus}</span>
+              </p>
+            </div>
+          </div>
+
           {/* Product & Quantity Highlight */}
-          <div className="border-2 border-black bg-yellow-50 p-4 rounded-lg mb-4 flex flex-wrap justify-between items-center gap-3">
+          <div className="border-2 border-black bg-yellow-50 p-3.5 rounded-lg mb-4 flex flex-wrap justify-between items-center gap-3">
             <div>
               <span className="text-[10px] font-bold uppercase tracking-wider text-gray-600 block">Product</span>
-              <h2 className="text-lg font-black text-gray-950">
+              <h2 className="text-base font-black text-gray-950">
                 {primaryItem.productNameSnapshot || primaryItem.product?.name || 'Commercial Print Item'}
               </h2>
+              {primaryItem.skuSnapshot && <p className="text-[10px] font-mono text-gray-500">SKU: {primaryItem.skuSnapshot}</p>}
             </div>
             <div className="text-right">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-gray-600 block">Exact Quantity</span>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-gray-600 block">Exact Production Quantity</span>
               <span className="text-2xl font-black text-red-600 bg-white px-3 py-1 rounded border border-red-300 inline-block">
                 {primaryItem.quantity} <span className="text-xs font-bold text-black">{primaryItem.quantityUnit || 'pcs'}</span>
               </span>
@@ -128,9 +166,9 @@ export default function JobCardModal({ show, onClose, order, job = null }) {
           {/* Core Technical Specifications Table */}
           <div className="mb-4">
             <h3 className="text-xs font-black uppercase tracking-wider text-gray-700 mb-2 border-b pb-1">
-              ⚙️ Technical Production Specifications
+              ⚙️ Complete Print & Finishing Specifications
             </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
               <div className="bg-gray-50 p-2.5 rounded border border-gray-200">
                 <span className="font-bold text-gray-500 uppercase text-[10px] block">Paper Stock / GSM</span>
                 <span className="font-black text-gray-900 text-sm mt-0.5 block">{paper}</span>
@@ -150,7 +188,7 @@ export default function JobCardModal({ show, onClose, order, job = null }) {
             </div>
 
             {/* Special Finishing Banner */}
-            <div className="mt-3 bg-purple-50 p-2.5 rounded border border-purple-200 text-xs flex items-center justify-between">
+            <div className="mt-2.5 bg-purple-50 p-2.5 rounded border border-purple-200 text-xs flex items-center justify-between">
               <div>
                 <span className="font-bold text-purple-700 uppercase text-[10px] block">Special Post-Press Finishing</span>
                 <span className="font-black text-purple-950 text-sm">{specialFinishing}</span>
@@ -159,22 +197,30 @@ export default function JobCardModal({ show, onClose, order, job = null }) {
             </div>
           </div>
 
-          {/* Machine Assignment & Artwork Details */}
+          {/* Floor Machine, Staff & Artwork Verification Status */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4 text-xs">
             <div className="border border-gray-300 p-3 rounded-lg">
-              <span className="font-bold text-gray-500 uppercase text-[10px] block">Machine Assignment</span>
+              <span className="font-bold text-gray-500 uppercase text-[10px] block">Floor Assignment</span>
               <p className="font-bold text-gray-900 mt-1">
-                Press: <span className="font-black">{order.machineNumber || currentJob.machineNumber || 'Digital Color Press C4070'}</span>
+                Press Machine: <span className="font-black">{order.machineNumber || currentJob.machineNumber || 'Digital Color Press C4080'}</span>
               </p>
               <p className="text-gray-700 mt-0.5">
-                Operator: <span className="font-bold">{order.assignedStaffName || currentJob.assignedStaffName || 'Press Operator'}</span>
+                Assigned Staff: <span className="font-bold">{order.assignedStaffName || currentJob.assignedStaffName || 'Press Team Lead'}</span>
               </p>
             </div>
 
             <div className="border border-gray-300 p-3 rounded-lg">
-              <span className="font-bold text-gray-500 uppercase text-[10px] block">Prepress & Artwork File</span>
+              <span className="font-bold text-gray-500 uppercase text-[10px] block">Prepress & Artwork File Status</span>
               <p className="font-bold text-green-700 mt-1">
-                Status: {primaryItem.artworkOption === 'DESIGN_SUPPORT' ? '🎨 Custom Designed & Approved' : '✔ Print-Ready PDF Provided'}
+                Artwork Status: <span className="font-black">{currentJob.artworkStatus || 'APPROVED'}</span>
+              </p>
+              <p className="text-gray-700 mt-0.5">
+                Proof Status: <span className="font-bold text-blue-700">{order.proofStatus || 'APPROVED'}</span>
+                {order.proofApprovedAt && (
+                  <span className="text-[10px] text-gray-500 ml-1">
+                    ({new Date(order.proofApprovedAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })})
+                  </span>
+                )}
               </p>
               {primaryItem.artworkFileUrl ? (
                 <a
@@ -183,42 +229,42 @@ export default function JobCardModal({ show, onClose, order, job = null }) {
                   rel="noreferrer"
                   className="inline-flex items-center gap-1 font-bold text-blue-600 hover:underline mt-1 print:hidden"
                 >
-                  <HiOutlinePhotograph className="w-3.5 h-3.5" /> Download / View Print File
+                  <HiOutlinePhotograph className="w-3.5 h-3.5" /> Download / View Approved Artwork
                 </a>
               ) : (
-                <span className="text-gray-500 text-[11px] block mt-1">Artwork linked in prepress server</span>
+                <span className="text-gray-500 text-[11px] block mt-1">Artwork verified in prepress hub</span>
               )}
             </div>
           </div>
 
-          {/* Special Operator Notes (if any) */}
+          {/* Operator Notes */}
           <div className="border border-dashed border-gray-400 p-2.5 rounded-lg mb-4 text-xs bg-gray-50">
-            <span className="font-bold uppercase text-[10px] text-gray-600 block">Operator Notes:</span>
+            <span className="font-bold uppercase text-[10px] text-gray-600 block">Operator Instructions:</span>
             <p className="text-gray-800 italic mt-0.5">
-              {primaryItem.requirementNotes || order.statusHistory?.[0]?.note || 'Ensure clean cut margins. Pack in 100-pc bundles with moisture-proof wrapping.'}
+              {primaryItem.requirementNotes || order.statusHistory?.[0]?.note || 'Verify registration marks, color saturation, and 2mm bleed clearance before cutting.'}
             </p>
           </div>
 
-          {/* Physical Operator Quality Sign-Off Checklist (Printed on Ticket) */}
+          {/* Floor Operator Sign-Off Checklist */}
           <div className="border-t-2 border-black pt-3">
             <span className="text-[10px] font-black uppercase tracking-wider text-gray-700 block mb-2">
-              📋 Floor Operator Quality Sign-Off (Initial upon completion)
+              📋 Floor Operator Physical Sign-Off (Mandatory Sign-off per department)
             </span>
             <div className="grid grid-cols-4 gap-2 text-center text-[10px] font-mono">
               <div className="border border-black p-2 rounded">
-                <span className="block font-bold">1. Press Run</span>
+                <span className="block font-bold">1. Prepress QC</span>
                 <span className="text-gray-400 block mt-2">Sign: ________</span>
               </div>
               <div className="border border-black p-2 rounded">
-                <span className="block font-bold">2. Lamination</span>
+                <span className="block font-bold">2. Press Run</span>
                 <span className="text-gray-400 block mt-2">Sign: ________</span>
               </div>
               <div className="border border-black p-2 rounded">
-                <span className="block font-bold">3. Cut & QC</span>
+                <span className="block font-bold">3. Cut & Finish</span>
                 <span className="text-gray-400 block mt-2">Sign: ________</span>
               </div>
               <div className="border border-black p-2 rounded">
-                <span className="block font-bold">4. Packed</span>
+                <span className="block font-bold">4. Packed & QC</span>
                 <span className="text-gray-400 block mt-2">Sign: ________</span>
               </div>
             </div>
@@ -230,7 +276,7 @@ export default function JobCardModal({ show, onClose, order, job = null }) {
           Close
         </Button>
         <Button color="dark" onClick={handlePrint} className="flex items-center gap-2">
-          <HiOutlinePrinter className="w-4 h-4 mr-1" /> Print Clean Job Card
+          <HiOutlinePrinter className="w-4 h-4 mr-1" /> Print Complete Job Card
         </Button>
       </Modal.Footer>
     </Modal>

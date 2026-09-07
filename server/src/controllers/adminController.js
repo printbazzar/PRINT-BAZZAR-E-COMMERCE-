@@ -1,6 +1,10 @@
 import { PrismaClient } from '@prisma/client';
 import { toAdminOrderDetailsProjection } from '../utils/projections.js';
 import { getOtpConfig } from '../config/otpConfig.js';
+import {
+  validateOrderTransition,
+  validateDepartmentAuthorization,
+} from '../services/workflowStateService.js';
 
 const prisma = new PrismaClient();
 
@@ -876,7 +880,7 @@ export const deleteBanner = async (req, res) => {
 // 5. Admin Orders Management
 export const getAdminOrders = async (req, res) => {
   try {
-    const { search, status, paymentStatus, page = 1, limit = 50 } = req.query;
+    const { search, status, paymentStatus, department, priority, page = 1, limit = 50 } = req.query;
     const where = {};
 
     if (search && search.trim()) {
@@ -899,6 +903,10 @@ export const getAdminOrders = async (req, res) => {
       where.orderStatus = { in: Array.from(new Set(statusVariants)) };
     }
     if (paymentStatus && paymentStatus !== 'ALL') where.paymentStatus = paymentStatus;
+    if (department && department !== 'ALL') where.currentDepartment = department;
+    if (priority && priority !== 'ALL') {
+      where.productionJobs = { some: { priority } };
+    }
 
     const take = parseInt(limit, 10) || 50;
     const skip = (parseInt(page, 10) - 1) * take;
@@ -983,20 +991,65 @@ export const updateOrderStatus = async (req, res) => {
     const { id } = req.params;
     const { status, note, customerNote, trackingReference, estimatedDeliveryDate, paymentStatus } = req.body;
 
-    const order = await prisma.order.findUnique({ where: { id } });
+    const order = await prisma.order.findUnique({ where: { id }, include: { productionJobs: true } });
     if (!order) return res.status(404).json({ success: false, message: 'Order not found' });
 
     const previousStatus = order.orderStatus;
 
-    const updated = await prisma.order.update({
-      where: { id },
-      data: {
-        orderStatus: status || order.orderStatus,
-        paymentStatus: paymentStatus || order.paymentStatus,
-        trackingReference: trackingReference !== undefined ? trackingReference : order.trackingReference,
-        estimatedDeliveryDate: estimatedDeliveryDate ? new Date(estimatedDeliveryDate) : order.estimatedDeliveryDate,
-        statusHistory: status && status !== previousStatus
-          ? {
+    // Strict State-Machine Transition Validation
+    if (status && status !== previousStatus) {
+      const transitionCheck = validateOrderTransition(previousStatus, status);
+      if (!transitionCheck.isValid) {
+        return res.status(400).json({ success: false, message: transitionCheck.error });
+      }
+
+      // Map target job status if transitioning to production/finishing/qc/delivery
+      let targetJobStatus = null;
+      let targetDept = order.currentDepartment;
+
+      if (status === 'PRE_PRODUCTION_QC') {
+        targetJobStatus = 'PRE_PRODUCTION_QC';
+        targetDept = 'PRODUCTION';
+      } else if (status === 'PRODUCTION_QUEUE') {
+        targetJobStatus = 'QUEUED';
+        targetDept = 'PRODUCTION';
+      } else if (status === 'MACHINE_ASSIGNED') {
+        targetJobStatus = 'MACHINE_ASSIGNED';
+        targetDept = 'PRODUCTION';
+      } else if (status === 'PRINTING') {
+        targetJobStatus = 'PRINTING';
+        targetDept = 'PRODUCTION';
+      } else if (status === 'FINISHING') {
+        targetJobStatus = 'FINISHING';
+        targetDept = 'FINISHING_QC';
+      } else if (status === 'QUALITY_CHECK' || status === 'QC') {
+        targetJobStatus = 'SENT_TO_QC';
+        targetDept = 'FINISHING_QC';
+      } else if (status === 'PACKING' || status === 'PACKED') {
+        targetDept = 'PACKING';
+      } else if (status === 'READY_FOR_DELIVERY' || status === 'READY_FOR_DISPATCH' || status === 'OUT_FOR_DELIVERY' || status === 'DISPATCHED') {
+        targetDept = 'DELIVERY';
+      } else if (status === 'DELIVERED' || status === 'COMPLETED') {
+        targetJobStatus = 'COMPLETED';
+        targetDept = 'COMPLETED';
+      }
+
+      // Role check for target department
+      const authCheck = validateDepartmentAuthorization(req.user, targetDept, 'TRANSITION');
+      if (!authCheck.authorized) {
+        return res.status(403).json({ success: false, message: authCheck.error });
+      }
+
+      const updated = await prisma.$transaction(async (tx) => {
+        const ord = await tx.order.update({
+          where: { id },
+          data: {
+            orderStatus: status,
+            currentDepartment: targetDept,
+            paymentStatus: paymentStatus || order.paymentStatus,
+            trackingReference: trackingReference !== undefined ? trackingReference : order.trackingReference,
+            estimatedDeliveryDate: estimatedDeliveryDate ? new Date(estimatedDeliveryDate) : order.estimatedDeliveryDate,
+            statusHistory: {
               create: {
                 previousStatus,
                 newStatus: status,
@@ -1004,23 +1057,59 @@ export const updateOrderStatus = async (req, res) => {
                 note: note || `Order status updated to ${status} by admin.`,
                 customerNote: customerNote || null,
               },
-            }
-          : undefined,
-      },
-      include: { statusHistory: true },
+            },
+          },
+          include: { statusHistory: true },
+        });
+
+        if (targetJobStatus) {
+          await tx.productionJob.updateMany({
+            where: { orderId: id },
+            data: {
+              status: targetJobStatus,
+              ...(status === 'PRINTING' ? { startedAt: new Date() } : {}),
+              ...(status === 'DELIVERED' || status === 'COMPLETED' ? { completedAt: new Date() } : {}),
+            },
+          });
+        }
+
+        await tx.auditLog.create({
+          data: {
+            action: 'UPDATE_ORDER_STATUS',
+            entityName: 'Order',
+            entityId: id,
+            userId: req.user?.id || null,
+            oldValues: JSON.stringify({ status: previousStatus, paymentStatus: order.paymentStatus }),
+            newValues: JSON.stringify({ status, paymentStatus: paymentStatus || order.paymentStatus, note }),
+            ipAddress: req?.ip || req?.headers['x-forwarded-for'] || null,
+          },
+        });
+
+        return ord;
+      });
+
+      return res.json({ success: true, message: 'Order status updated successfully', data: updated });
+    }
+
+    // Idempotent duplicate call: Status unchanged
+    if (paymentStatus && paymentStatus !== order.paymentStatus) {
+      const updated = await prisma.order.update({
+        where: { id },
+        data: {
+          paymentStatus,
+          trackingReference: trackingReference !== undefined ? trackingReference : order.trackingReference,
+          estimatedDeliveryDate: estimatedDeliveryDate ? new Date(estimatedDeliveryDate) : order.estimatedDeliveryDate,
+        },
+      });
+      return res.json({ success: true, message: 'Payment status updated successfully', data: updated });
+    }
+
+    return res.json({
+      success: true,
+      isDuplicate: true,
+      message: `Order is already in status '${order.orderStatus}'. No state change executed.`,
+      data: order,
     });
-
-    await recordAudit(
-      req.user?.id,
-      'UPDATE_ORDER_STATUS',
-      'Order',
-      id,
-      { status: previousStatus },
-      { status: updated.orderStatus, note },
-      req
-    );
-
-    return res.json({ success: true, message: 'Order status updated successfully', data: updated });
   } catch (error) {
     console.error('Error updating order status:', error);
     return res.status(500).json({ success: false, message: 'Failed to update order status.' });

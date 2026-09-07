@@ -10,12 +10,13 @@ export default function AdminOrders() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [paymentFilter, setPaymentFilter] = useState('ALL');
+  const [departmentFilter, setDepartmentFilter] = useState('ALL');
   const [totalOrders, setTotalOrders] = useState(0);
   const [page, setPage] = useState(1);
 
   useEffect(() => {
     fetchOrders();
-  }, [search, statusFilter, paymentFilter, page]);
+  }, [search, statusFilter, paymentFilter, departmentFilter, page]);
 
   const fetchOrders = async () => {
     setLoading(true);
@@ -24,6 +25,7 @@ export default function AdminOrders() {
         search,
         status: statusFilter,
         paymentStatus: paymentFilter,
+        department: departmentFilter,
         page,
         limit: 25,
       });
@@ -90,7 +92,7 @@ export default function AdminOrders() {
       </div>
 
       {/* Search & Status Filters */}
-      <div className="bg-white p-4 rounded-xl border shadow-xs grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <div className="bg-white p-4 rounded-xl border shadow-xs grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         <TextInput
           type="text"
           placeholder="Search by Order ID, Name, Mobile..."
@@ -102,6 +104,23 @@ export default function AdminOrders() {
           icon={HiSearch}
           size="sm"
         />
+
+        <Select
+          value={departmentFilter}
+          onChange={(e) => {
+            setDepartmentFilter(e.target.value);
+            setPage(1);
+          }}
+          size="sm"
+        >
+          <option value="ALL">All Departments</option>
+          <option value="DESIGN">Design & Prepress</option>
+          <option value="PRODUCTION">Press Production</option>
+          <option value="FINISHING_QC">Finishing & QC</option>
+          <option value="PACKING">Packaging Desk</option>
+          <option value="DELIVERY">Logistics & Delivery</option>
+          <option value="COMPLETED">Completed</option>
+        </Select>
 
         <Select
           value={statusFilter}

@@ -1,5 +1,12 @@
 import { PrismaClient } from '@prisma/client';
 import { sendOrderNotification } from '../services/notificationService.js';
+import {
+  validateOrderTransition,
+  validateJobTransition,
+  validateDepartmentAuthorization,
+  validatePreProductionChecklist,
+  MANDATORY_PRE_PRODUCTION_CHECKLIST,
+} from '../services/workflowStateService.js';
 
 const prisma = new PrismaClient();
 
@@ -28,6 +35,10 @@ export const DEPARTMENTS = {
       'DESIGN_IN_PROGRESS',
       'DESIGN_REVIEW',
       'DESIGN_APPROVED',
+      'DRAFT_READY',
+      'SENT_TO_CUSTOMER',
+      'REVISION',
+      'REVISION_REQUESTED',
     ],
   },
   PRODUCTION: {
@@ -35,21 +46,21 @@ export const DEPARTMENTS = {
     title: '2. Print Room & Production',
     description: 'Pre-production QC, press queue & machine printing',
     color: 'yellow',
-    statuses: ['PRE_PRODUCTION_QC', 'PRODUCTION_QUEUE', 'PRINTING'],
+    statuses: ['PRE_PRODUCTION_QC', 'PRODUCTION_QUEUE', 'MACHINE_ASSIGNED', 'PRINTING', 'PRINTING_COMPLETED'],
   },
   FINISHING_QC: {
     key: 'FINISHING_QC',
     title: '3. Finishing & Quality Control',
     description: 'Lamination, die-cutting, folding & inspection pass',
     color: 'indigo',
-    statuses: ['FINISHING', 'QUALITY_CHECK', 'QC'],
+    statuses: ['FINISHING', 'FINISHING_COMPLETED', 'QUALITY_CHECK', 'QC'],
   },
   PACKING: {
     key: 'PACKING',
     title: '4. Packaging & Dispatch Desk',
     description: 'Box packing, bubble wrapping, weighing & dispatch preparation',
     color: 'orange',
-    statuses: ['PACKING', 'PACKED', 'READY', 'READY_FOR_DISPATCH', 'READY_FOR_DELIVERY'],
+    statuses: ['PACKING', 'PACKED', 'READY', 'READY_FOR_DISPATCH', 'READY_FOR_DELIVERY', 'READY_FOR_PICKUP'],
   },
   DELIVERY: {
     key: 'DELIVERY',
@@ -63,7 +74,7 @@ export const DEPARTMENTS = {
     title: '6. Delivered & Completed',
     description: 'Order handed over to customer',
     color: 'green',
-    statuses: ['DELIVERED', 'COMPLETED'],
+    statuses: ['DELIVERED', 'COMPLETED', 'PICKED_UP'],
   },
 };
 
@@ -86,6 +97,10 @@ export const getWorkflowBoard = async (req, res) => {
               },
             },
           },
+        },
+        productionJobs: {
+          take: 1,
+          orderBy: { createdAt: 'asc' },
         },
         statusHistory: {
           orderBy: { createdAt: 'desc' },
@@ -131,7 +146,7 @@ export const getWorkflowBoard = async (req, res) => {
     });
 
     const summary = {
-      totalActive: orders.filter((o) => o.orderStatus !== 'DELIVERED').length,
+      totalActive: orders.filter((o) => o.orderStatus !== 'DELIVERED' && o.orderStatus !== 'COMPLETED').length,
       byDepartment: {
         DESIGN: columns.DESIGN.length,
         PRODUCTION: columns.PRODUCTION.length,
@@ -176,7 +191,7 @@ export const handoverOrder = async (req, res) => {
 
     const order = await prisma.order.findUnique({
       where: { id },
-      include: { customer: true },
+      include: { customer: true, productionJobs: true },
     });
 
     if (!order) {
@@ -187,11 +202,33 @@ export const handoverOrder = async (req, res) => {
     const effectiveStatus = newStatus || oldStatus;
     const effectiveDept = targetDepartment || order.currentDepartment;
 
+    // 1. Role / Department Authorization Check
+    const authCheck = validateDepartmentAuthorization(req.user, effectiveDept, 'TRANSITION');
+    if (!authCheck.authorized) {
+      return res.status(403).json({ success: false, message: authCheck.error });
+    }
+
+    // 2. Strict State-Machine Transition Validation
+    const transitionCheck = validateOrderTransition(oldStatus, effectiveStatus);
+    if (!transitionCheck.isValid) {
+      return res.status(400).json({ success: false, message: transitionCheck.error });
+    }
+
+    // Idempotent duplicate call handling
+    if (transitionCheck.isDuplicate && effectiveDept === order.currentDepartment) {
+      return res.json({
+        success: true,
+        isDuplicate: true,
+        message: `Order is already in ${effectiveStatus} (${effectiveDept}). No state change needed.`,
+        order,
+      });
+    }
+
     // Generate automated customer note if none supplied
     let generatedNote = note;
     if (!generatedNote) {
       if (effectiveDept === 'PRODUCTION') {
-        generatedNote = `Artwork approved. Transferred to Printing Press room on ${machineNumber || 'Digital Offset Machine'}.`;
+        generatedNote = `Transferred to Printing Press room on ${machineNumber || 'Digital Offset Press'}.`;
       } else if (effectiveDept === 'FINISHING_QC') {
         generatedNote = 'Printing completed. Job handed over to Finishing & Quality Inspection desk.';
       } else if (effectiveDept === 'PACKING') {
@@ -203,38 +240,61 @@ export const handoverOrder = async (req, res) => {
       }
     }
 
-    // Update order with department fields
-    const updatedOrder = await prisma.order.update({
-      where: { id },
-      data: {
-        orderStatus: effectiveStatus,
-        currentDepartment: effectiveDept,
-        assignedStaffName: assignedStaffName || order.assignedStaffName,
-        machineNumber: machineNumber !== undefined ? machineNumber : order.machineNumber,
-        proofFileUrl: proofFileUrl !== undefined ? proofFileUrl : order.proofFileUrl,
-        proofStatus: proofStatus !== undefined ? proofStatus : order.proofStatus,
-        packingWeight: packingWeight !== undefined ? packingWeight : order.packingWeight,
-        courierPartner: courierPartner !== undefined ? courierPartner : order.courierPartner,
-        trackingReference: trackingReference !== undefined ? trackingReference : order.trackingReference,
-        trackingUrl: trackingUrl !== undefined ? trackingUrl : order.trackingUrl,
-        statusHistory: {
-          create: {
-            previousStatus: oldStatus,
-            newStatus: effectiveStatus,
-            note: `${generatedNote} [Department: ${effectiveDept}]`,
-            changedByUserId: req.user?.id || null,
+    // Map Order Status to corresponding ProductionJob Status
+    let targetJobStatus = null;
+    if (effectiveStatus === 'PRE_PRODUCTION_QC') targetJobStatus = 'PRE_PRODUCTION_QC';
+    else if (effectiveStatus === 'PRODUCTION_QUEUE') targetJobStatus = 'QUEUED';
+    else if (effectiveStatus === 'MACHINE_ASSIGNED') targetJobStatus = 'MACHINE_ASSIGNED';
+    else if (effectiveStatus === 'PRINTING') targetJobStatus = 'PRINTING';
+    else if (effectiveStatus === 'FINISHING') targetJobStatus = 'FINISHING';
+    else if (effectiveStatus === 'QUALITY_CHECK' || effectiveStatus === 'QC') targetJobStatus = 'SENT_TO_QC';
+    else if (effectiveStatus === 'DELIVERED' || effectiveStatus === 'COMPLETED') targetJobStatus = 'COMPLETED';
+
+    // Atomic Database Transaction for Order & ProductionJob Synchronization
+    const updatedOrder = await prisma.$transaction(async (tx) => {
+      const ord = await tx.order.update({
+        where: { id },
+        data: {
+          orderStatus: effectiveStatus,
+          currentDepartment: effectiveDept,
+          assignedStaffName: assignedStaffName || order.assignedStaffName,
+          machineNumber: machineNumber !== undefined ? machineNumber : order.machineNumber,
+          proofFileUrl: proofFileUrl !== undefined ? proofFileUrl : order.proofFileUrl,
+          proofStatus: proofStatus !== undefined ? proofStatus : order.proofStatus,
+          packingWeight: packingWeight !== undefined ? packingWeight : order.packingWeight,
+          courierPartner: courierPartner !== undefined ? courierPartner : order.courierPartner,
+          trackingReference: trackingReference !== undefined ? trackingReference : order.trackingReference,
+          trackingUrl: trackingUrl !== undefined ? trackingUrl : order.trackingUrl,
+          statusHistory: {
+            create: {
+              previousStatus: oldStatus,
+              newStatus: effectiveStatus,
+              note: `${generatedNote} [Department: ${effectiveDept}]`,
+              changedByUserId: req.user?.id || null,
+            },
           },
         },
-      },
-      include: {
-        items: true,
-        statusHistory: { orderBy: { createdAt: 'desc' } },
-      },
-    });
+        include: {
+          items: true,
+          statusHistory: { orderBy: { createdAt: 'desc' } },
+        },
+      });
 
-    // Record Audit Log
-    try {
-      await prisma.auditLog.create({
+      if (targetJobStatus) {
+        await tx.productionJob.updateMany({
+          where: { orderId: id },
+          data: {
+            status: targetJobStatus,
+            ...(machineNumber ? { machineNumber } : {}),
+            ...(assignedStaffName ? { assignedStaffName } : {}),
+            ...(effectiveStatus === 'PRINTING' ? { startedAt: new Date() } : {}),
+            ...(effectiveStatus === 'DELIVERED' || effectiveStatus === 'COMPLETED' ? { completedAt: new Date() } : {}),
+            ...(proofStatus === 'APPROVED' ? { artworkStatus: 'APPROVED' } : {}),
+          },
+        });
+      }
+
+      await tx.auditLog.create({
         data: {
           action: 'DEPARTMENT_HANDOVER',
           entityName: 'Order',
@@ -245,14 +305,15 @@ export const handoverOrder = async (req, res) => {
             department: effectiveDept,
             status: effectiveStatus,
             staff: assignedStaffName,
+            jobStatus: targetJobStatus,
             note: generatedNote,
           }),
           ipAddress: req.ip || '127.0.0.1',
         },
       });
-    } catch (auditErr) {
-      console.error('Failed to log audit:', auditErr);
-    }
+
+      return ord;
+    });
 
     // Asynchronously dispatch milestone notification to customer
     try {
@@ -273,7 +334,7 @@ export const handoverOrder = async (req, res) => {
 
     return res.json({
       success: true,
-      message: `Order successfully handed over to ${effectiveDept} department.`,
+      message: `Order successfully handed over to ${effectiveDept} department (${effectiveStatus}).`,
       order: updatedOrder,
     });
   } catch (error) {
@@ -283,6 +344,8 @@ export const handoverOrder = async (req, res) => {
 };
 
 // POST /api/v1/orders/:orderNumber/approve-proof - Customer One-Click Proof Approval
+// Strict Rule #1: Customer Proof Approval MUST NEVER directly move an order to PRODUCTION_QUEUE.
+// Mandatory Workflow: CUSTOMER_PROOF_APPROVED -> PRE_PRODUCTION_QC -> QC_APPROVED -> PRODUCTION_QUEUE -> PRINTING
 export const approveCustomerProof = async (req, res) => {
   try {
     const { orderNumber } = req.params;
@@ -290,7 +353,7 @@ export const approveCustomerProof = async (req, res) => {
 
     const order = await prisma.order.findUnique({
       where: { orderNumber },
-      include: { invoices: true, items: true },
+      include: { invoices: true, items: true, productionJobs: true, designOrders: true },
     });
 
     if (!order) {
@@ -308,53 +371,140 @@ export const approveCustomerProof = async (req, res) => {
           success: true,
           requiresBalancePayment: true,
           balanceDue,
-          message: `Digital proof approved! Please complete the printing balance payment of ₹${balanceDue} to release order to the Press Room.`,
+          message: `Digital proof approved! Please complete the printing balance payment of ₹${balanceDue} to release order to Pre-Production QC.`,
           order,
         });
       }
 
-      // Auto-advance to PRODUCTION department
-      const updated = await prisma.order.update({
-        where: { orderNumber },
-        data: {
-          proofStatus: 'APPROVED',
-          proofApprovedAt: new Date(),
-          currentDepartment: 'PRODUCTION',
-          orderStatus: 'PRODUCTION_QUEUE',
-          statusHistory: {
-            create: {
-              previousStatus: order.orderStatus,
-              newStatus: 'PRODUCTION_QUEUE',
-              note: `Digital proof approved by customer online. Auto-assigned to Press Production queue. ${
-                customerComment ? `Note: "${customerComment}"` : ''
-              }`,
+      // STRICT BUSINESS RULE: Proof approval moves ONLY to PRE_PRODUCTION_QC (NEVER PRODUCTION_QUEUE directly)
+      const targetStatus = 'PRE_PRODUCTION_QC';
+      const targetDept = 'PRODUCTION';
+      const now = new Date();
+
+      const updated = await prisma.$transaction(async (tx) => {
+        // 1. Update Order: move strictly to PRE_PRODUCTION_QC
+        const ord = await tx.order.update({
+          where: { orderNumber },
+          data: {
+            proofStatus: 'APPROVED',
+            proofApprovedAt: now,
+            currentDepartment: targetDept,
+            orderStatus: targetStatus,
+            statusHistory: {
+              create: {
+                previousStatus: order.orderStatus,
+                newStatus: targetStatus,
+                note: `Digital proof approved by customer online. Order transferred strictly to Pre-Production QC Prepress Gate. ${
+                  customerComment ? `Note: "${customerComment}"` : ''
+                }`,
+              },
             },
           },
-        },
+          include: {
+            items: true,
+            statusHistory: { orderBy: { createdAt: 'desc' } },
+          },
+        });
+
+        // 2. Synchronize ProductionJobs: update artworkStatus to APPROVED and status to PRE_PRODUCTION_QC
+        await tx.productionJob.updateMany({
+          where: { orderId: order.id },
+          data: {
+            status: 'PRE_PRODUCTION_QC',
+            artworkStatus: 'APPROVED',
+            approvedArtworkUrl: order.proofFileUrl || order.items?.[0]?.artworkFileUrl || null,
+            approvedArtworkVersion: 'Proof V1 - Approved by Customer',
+          },
+        });
+
+        // 3. Synchronize DesignOrders: mark as APPROVED
+        await tx.designOrder.updateMany({
+          where: { orderId: order.id },
+          data: {
+            status: 'APPROVED',
+            approvedAt: now,
+          },
+        });
+
+        // 4. Record Audit Log
+        await tx.auditLog.create({
+          data: {
+            action: 'CUSTOMER_PROOF_APPROVED',
+            entityName: 'Order',
+            entityId: order.id,
+            oldValues: JSON.stringify({ status: order.orderStatus, proofStatus: order.proofStatus }),
+            newValues: JSON.stringify({
+              status: targetStatus,
+              department: targetDept,
+              proofStatus: 'APPROVED',
+              approvedAt: now.toISOString(),
+              customerComment,
+            }),
+            ipAddress: req.ip || '127.0.0.1',
+          },
+        });
+
+        return ord;
       });
 
       return res.json({
         success: true,
         requiresBalancePayment: false,
-        message: 'Proof approved! Your order has moved to the Printing Press production room.',
+        message: 'Digital proof approved! Your order has moved to Pre-Production QC for prepress verification.',
         order: updated,
       });
     } else {
       // Revision requested
-      const updated = await prisma.order.update({
-        where: { orderNumber },
-        data: {
-          proofStatus: 'REVISION_REQUESTED',
-          currentDepartment: 'DESIGN',
-          orderStatus: 'DESIGN_IN_PROGRESS',
-          statusHistory: {
-            create: {
-              previousStatus: order.orderStatus,
-              newStatus: 'DESIGN_IN_PROGRESS',
-              note: `Customer requested design revision: "${customerComment || 'Please adjust artwork.'}"`,
+      const targetStatus = 'DESIGN_IN_PROGRESS';
+      const targetDept = 'DESIGN';
+
+      const updated = await prisma.$transaction(async (tx) => {
+        const ord = await tx.order.update({
+          where: { orderNumber },
+          data: {
+            proofStatus: 'REVISION_REQUESTED',
+            currentDepartment: targetDept,
+            orderStatus: targetStatus,
+            statusHistory: {
+              create: {
+                previousStatus: order.orderStatus,
+                newStatus: targetStatus,
+                note: `Customer requested design revision: "${customerComment || 'Please adjust artwork.'}"`,
+              },
             },
           },
-        },
+        });
+
+        await tx.designOrder.updateMany({
+          where: { orderId: order.id },
+          data: { status: 'REVISION' },
+        });
+
+        await tx.productionJob.updateMany({
+          where: { orderId: order.id },
+          data: {
+            status: 'WAITING_FOR_DESIGN_APPROVAL',
+            artworkStatus: 'WAITING_APPROVAL',
+          },
+        });
+
+        await tx.auditLog.create({
+          data: {
+            action: 'CUSTOMER_PROOF_REVISION_REQUESTED',
+            entityName: 'Order',
+            entityId: order.id,
+            oldValues: JSON.stringify({ status: order.orderStatus, proofStatus: order.proofStatus }),
+            newValues: JSON.stringify({
+              status: targetStatus,
+              department: targetDept,
+              proofStatus: 'REVISION_REQUESTED',
+              customerComment,
+            }),
+            ipAddress: req.ip || '127.0.0.1',
+          },
+        });
+
+        return ord;
       });
 
       return res.json({
@@ -366,5 +516,346 @@ export const approveCustomerProof = async (req, res) => {
   } catch (error) {
     console.error('Error approving proof:', error);
     return res.status(500).json({ success: false, message: 'Failed to process proof approval.' });
+  }
+};
+
+// POST /api/v1/admin/orders/:id/pre-production-qc
+// Mandatory Pre-Production QC Gate: Verifies 12-point prepress checklist before releasing to PRODUCTION_QUEUE
+export const submitPreProductionQC = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, checklist = {}, inspectorName, notes } = req.body;
+
+    if (!['PASSED', 'FAILED'].includes(status)) {
+      return res.status(400).json({ success: false, message: "QC status must be 'PASSED' or 'FAILED'." });
+    }
+
+    const order = await prisma.order.findUnique({
+      where: { id },
+      include: { productionJobs: true },
+    });
+
+    if (!order) {
+      return res.status(404).json({ success: false, message: 'Order not found.' });
+    }
+
+    // Role check: Only Prepress (DESIGN), Production, or Super Admin can pass Pre-Production QC
+    const authCheck = validateDepartmentAuthorization(req.user, 'PRODUCTION', 'PRE_PRODUCTION_QC');
+    if (!authCheck.authorized) {
+      return res.status(403).json({ success: false, message: authCheck.error });
+    }
+
+    const inspector = inspectorName || req.user?.name || 'Prepress Lead';
+
+    if (status === 'PASSED') {
+      // Validate all 12 mandatory prepress checklist keys
+      const checklistValidation = validatePreProductionChecklist(checklist);
+      if (!checklistValidation.isValid) {
+        return res.status(400).json({
+          success: false,
+          message: `PRE-PRODUCTION QC FAILED: Mandatory checks missing: [${checklistValidation.missingKeys.join(', ')}]. All 12 prepress checks must be verified before releasing to PRODUCTION_QUEUE.`,
+          missingKeys: checklistValidation.missingKeys,
+        });
+      }
+
+      // Validate transition: Order must be in PRE_PRODUCTION_QC to advance to PRODUCTION_QUEUE
+      const transitionCheck = validateOrderTransition(order.orderStatus, 'PRODUCTION_QUEUE');
+      if (!transitionCheck.isValid) {
+        return res.status(400).json({ success: false, message: transitionCheck.error });
+      }
+
+      const now = new Date();
+      const qcNumber = `PB-PREQC-${now.getFullYear()}-${String(await prisma.qualityCheck.count() + 1).padStart(5, '0')}`;
+
+      // Atomic release to PRODUCTION_QUEUE
+      const updatedOrder = await prisma.$transaction(async (tx) => {
+        // 1. Advance Order to PRODUCTION_QUEUE
+        const ord = await tx.order.update({
+          where: { id },
+          data: {
+            orderStatus: 'PRODUCTION_QUEUE',
+            currentDepartment: 'PRODUCTION',
+            statusHistory: {
+              create: {
+                previousStatus: order.orderStatus,
+                newStatus: 'PRODUCTION_QUEUE',
+                note: `Pre-Production QC PASSED by ${inspector}. 12-point prepress checklist verified. Released to Press Production Queue. ${
+                  notes ? `Notes: "${notes}"` : ''
+                }`,
+                changedByUserId: req.user?.id || null,
+              },
+            },
+          },
+          include: { items: true, statusHistory: { orderBy: { createdAt: 'desc' } } },
+        });
+
+        // 2. Synchronize ProductionJobs: Set status = QUEUED, artworkStatus = APPROVED
+        await tx.productionJob.updateMany({
+          where: { orderId: id },
+          data: {
+            status: 'QUEUED',
+            artworkStatus: 'APPROVED',
+          },
+        });
+
+        // 3. Create QualityCheck record for Pre-Production Gate
+        await tx.qualityCheck.create({
+          data: {
+            qcNumber,
+            orderId: id,
+            productionJobId: order.productionJobs?.[0]?.id || null,
+            inspectorName: inspector,
+            status: 'PASSED',
+            checklistJson: JSON.stringify(checklist),
+            failureNotes: notes || null,
+            inspectedAt: now,
+          },
+        });
+
+        // 4. Audit Log
+        await tx.auditLog.create({
+          data: {
+            action: 'PRE_PRODUCTION_QC_PASSED',
+            entityName: 'Order',
+            entityId: id,
+            userId: req.user?.id || null,
+            oldValues: JSON.stringify({ status: order.orderStatus }),
+            newValues: JSON.stringify({
+              status: 'PRODUCTION_QUEUE',
+              department: 'PRODUCTION',
+              qcNumber,
+              inspector,
+            }),
+            ipAddress: req.ip || '127.0.0.1',
+          },
+        });
+
+        return ord;
+      });
+
+      return res.json({
+        success: true,
+        message: 'Pre-Production QC PASSED! 12-point checklist verified. Order released to Press Production Queue.',
+        order: updatedOrder,
+      });
+    } else {
+      // Pre-Production QC FAILED
+      const now = new Date();
+      const qcNumber = `PB-PREQC-${now.getFullYear()}-${String(await prisma.qualityCheck.count() + 1).padStart(5, '0')}`;
+
+      const updatedOrder = await prisma.$transaction(async (tx) => {
+        const ord = await tx.order.update({
+          where: { id },
+          data: {
+            orderStatus: 'ARTWORK_REVIEW',
+            currentDepartment: 'DESIGN',
+            statusHistory: {
+              create: {
+                previousStatus: order.orderStatus,
+                newStatus: 'ARTWORK_REVIEW',
+                note: `Pre-Production QC REJECTED by ${inspector}. Held in Prepress for resolution. Reason: ${notes || 'Prepress specifications did not match.'}`,
+                changedByUserId: req.user?.id || null,
+              },
+            },
+          },
+        });
+
+        await tx.productionJob.updateMany({
+          where: { orderId: id },
+          data: {
+            status: 'ARTWORK_REVIEW',
+            artworkStatus: 'WAITING_APPROVAL',
+          },
+        });
+
+        await tx.qualityCheck.create({
+          data: {
+            qcNumber,
+            orderId: id,
+            productionJobId: order.productionJobs?.[0]?.id || null,
+            inspectorName: inspector,
+            status: 'FAILED',
+            checklistJson: JSON.stringify(checklist),
+            failureReason: 'PREPRESS_SPEC_MISMATCH',
+            failureNotes: notes || 'Pre-Production QC rejected.',
+            inspectedAt: now,
+          },
+        });
+
+        await tx.auditLog.create({
+          data: {
+            action: 'PRE_PRODUCTION_QC_FAILED',
+            entityName: 'Order',
+            entityId: id,
+            userId: req.user?.id || null,
+            oldValues: JSON.stringify({ status: order.orderStatus }),
+            newValues: JSON.stringify({
+              status: 'ARTWORK_REVIEW',
+              qcNumber,
+              inspector,
+              notes,
+            }),
+            ipAddress: req.ip || '127.0.0.1',
+          },
+        });
+
+        return ord;
+      });
+
+      return res.status(400).json({
+        success: false,
+        message: 'Pre-Production QC FAILED. Order held in Prepress for resolution.',
+        order: updatedOrder,
+      });
+    }
+  } catch (error) {
+    console.error('submitPreProductionQC error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to submit Pre-Production QC.' });
+  }
+};
+
+// POST /api/v1/admin/orders/:id/artwork-review
+// Prepress staff inspects customer raw upload and advances to PRE_PRODUCTION_QC or requests re-upload
+export const reviewArtwork = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { action, notes, printReadyUrl } = req.body; // action: 'APPROVE' | 'REJECT'
+
+    const order = await prisma.order.findUnique({
+      where: { id },
+      include: { productionJobs: true, items: true },
+    });
+
+    if (!order) {
+      return res.status(404).json({ success: false, message: 'Order not found.' });
+    }
+
+    // Role check: Only Prepress (DESIGN) or Super Admin can perform artwork review
+    const authCheck = validateDepartmentAuthorization(req.user, 'DESIGN', 'ARTWORK_REVIEW');
+    if (!authCheck.authorized) {
+      return res.status(403).json({ success: false, message: authCheck.error });
+    }
+
+    const reviewer = req.user?.name || 'Prepress Specialist';
+
+    if (action === 'APPROVE') {
+      const targetStatus = 'PRE_PRODUCTION_QC';
+      const targetDept = 'PRODUCTION';
+      const effectivePrintFile = printReadyUrl || order.proofFileUrl || order.items?.[0]?.artworkFileUrl;
+
+      const updated = await prisma.$transaction(async (tx) => {
+        const ord = await tx.order.update({
+          where: { id },
+          data: {
+            orderStatus: targetStatus,
+            currentDepartment: targetDept,
+            proofStatus: 'APPROVED',
+            proofApprovedAt: new Date(),
+            proofFileUrl: effectivePrintFile,
+            statusHistory: {
+              create: {
+                previousStatus: order.orderStatus,
+                newStatus: targetStatus,
+                note: `Prepress artwork review APPROVED by ${reviewer}. File verified print-ready. Transferred to Pre-Production QC Gate. ${
+                  notes ? `Note: "${notes}"` : ''
+                }`,
+                changedByUserId: req.user?.id || null,
+              },
+            },
+          },
+        });
+
+        await tx.productionJob.updateMany({
+          where: { orderId: id },
+          data: {
+            status: 'PRE_PRODUCTION_QC',
+            artworkStatus: 'APPROVED',
+            approvedArtworkUrl: effectivePrintFile,
+            approvedArtworkVersion: 'Prepress Approved V1',
+          },
+        });
+
+        await tx.auditLog.create({
+          data: {
+            action: 'ARTWORK_REVIEW_APPROVED',
+            entityName: 'Order',
+            entityId: id,
+            userId: req.user?.id || null,
+            oldValues: JSON.stringify({ status: order.orderStatus }),
+            newValues: JSON.stringify({
+              status: targetStatus,
+              department: targetDept,
+              reviewer,
+              notes,
+            }),
+            ipAddress: req.ip || '127.0.0.1',
+          },
+        });
+
+        return ord;
+      });
+
+      return res.json({
+        success: true,
+        message: 'Artwork approved! Order transferred to Pre-Production QC Gate.',
+        order: updated,
+      });
+    } else {
+      // Rejection: Request customer re-upload
+      const targetStatus = 'ARTWORK_REVIEW';
+      const updated = await prisma.$transaction(async (tx) => {
+        const ord = await tx.order.update({
+          where: { id },
+          data: {
+            orderStatus: targetStatus,
+            proofStatus: 'REVISION_REQUESTED',
+            statusHistory: {
+              create: {
+                previousStatus: order.orderStatus,
+                newStatus: targetStatus,
+                note: `Artwork REJECTED by Prepress (${reviewer}). Reason: ${notes || 'File resolution or dimensions insufficient.'}`,
+                customerNote: `Artwork needs adjustment: ${notes || 'Please upload higher resolution file with bleed.'}`,
+                changedByUserId: req.user?.id || null,
+              },
+            },
+          },
+        });
+
+        await tx.productionJob.updateMany({
+          where: { orderId: id },
+          data: {
+            status: 'ARTWORK_REVIEW',
+            artworkStatus: 'WAITING_APPROVAL',
+          },
+        });
+
+        await tx.auditLog.create({
+          data: {
+            action: 'ARTWORK_REVIEW_REJECTED',
+            entityName: 'Order',
+            entityId: id,
+            userId: req.user?.id || null,
+            oldValues: JSON.stringify({ status: order.orderStatus }),
+            newValues: JSON.stringify({
+              status: targetStatus,
+              reviewer,
+              notes,
+            }),
+            ipAddress: req.ip || '127.0.0.1',
+          },
+        });
+
+        return ord;
+      });
+
+      return res.json({
+        success: true,
+        message: 'Artwork rejected. Customer notified to provide updated print files.',
+        order: updated,
+      });
+    }
+  } catch (error) {
+    console.error('reviewArtwork error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to review artwork.' });
   }
 };

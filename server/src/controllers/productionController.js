@@ -1,4 +1,8 @@
 import { PrismaClient } from '@prisma/client';
+import {
+  validateJobTransition,
+  validateDepartmentAuthorization,
+} from '../services/workflowStateService.js';
 
 const prisma = new PrismaClient();
 
@@ -144,15 +148,38 @@ export const updateProductionJobStage = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Production Job not found.' });
     }
 
-    // Design Lock Enforcement (Critical Requirement #20)
+    // Role / Department authorization check
+    const authCheck = validateDepartmentAuthorization(req.user, 'PRODUCTION', 'STAGE_UPDATE');
+    if (!authCheck.authorized) {
+      return res.status(403).json({ success: false, message: authCheck.error });
+    }
+
+    // Strict Job State-Machine Transition Validation
+    if (stage && stage !== job.status) {
+      const jobTransitionCheck = validateJobTransition(job.status, stage);
+      if (!jobTransitionCheck.isValid) {
+        return res.status(400).json({ success: false, message: jobTransitionCheck.error });
+      }
+    }
+
+    // Design Lock & Pre-Production QC Enforcement
     if (
-      job.status === 'WAITING_FOR_DESIGN_APPROVAL' &&
       job.artworkStatus !== 'APPROVED' &&
       ['PRINTING', 'FINISHING', 'SENT_TO_QC'].includes(stage)
     ) {
       return res.status(400).json({
         success: false,
         message: 'DESIGN LOCK: Cannot advance production until customer or prepress approves the design proof!',
+      });
+    }
+
+    if (
+      job.status === 'PRE_PRODUCTION_QC' &&
+      stage === 'PRINTING'
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: 'PRE_PRODUCTION_QC LOCK: Cannot print directly from Pre-Production QC. 12-point prepress checklist must pass to release to QUEUED first.',
       });
     }
 

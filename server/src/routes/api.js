@@ -67,6 +67,8 @@ import {
   getWorkflowBoard,
   handoverOrder,
   approveCustomerProof,
+  submitPreProductionQC,
+  reviewArtwork,
 } from '../controllers/workflowController.js';
 import {
   customerSignup,
@@ -325,6 +327,8 @@ router.post('/admin/orders/:id/notes', authenticateAdmin, requirePermission('ORD
 // Workflow
 router.get('/admin/workflow/board', authenticateAdmin, requirePermission('ORDER_VIEW'), getWorkflowBoard);
 router.post('/admin/orders/:id/handover', authenticateAdmin, requirePermission('ORDER_UPDATE'), handoverOrder);
+router.post('/admin/orders/:id/pre-production-qc', authenticateAdmin, requirePermission('ORDER_UPDATE'), submitPreProductionQC);
+router.post('/admin/orders/:id/artwork-review', authenticateAdmin, requirePermission('ORDER_UPDATE'), reviewArtwork);
 
 // Production Job Desk
 router.get('/admin/production/jobs', authenticateAdmin, requirePermission('ORDER_VIEW'), getProductionJobs);

@@ -861,31 +861,31 @@ export const approveDesign = async (req, res) => {
       },
     });
 
-    // If all design jobs approved, ACTIVATE PRINTING PRODUCTION! (Critical requirement #16 & #20)
+    // If all design jobs approved, route strictly to PRE_PRODUCTION_QC Gate! (Strict Rule #1)
     if (pendingJobs === 0) {
-      await prisma.order.update({
-        where: { id: designOrder.orderId },
-        data: {
-          proofStatus: 'APPROVED',
-          proofApprovedAt: new Date(),
-          currentDepartment: 'PRODUCTION', // Handover to press!
-          orderStatus: 'PRODUCTION_QUEUE',
-        },
-      });
-
-      // Unlock and update linked ProductionJob for press
       const latestRevision = await prisma.designRevision.findFirst({
         where: { designOrderId: id },
         orderBy: { revisionNumber: 'desc' },
       });
 
+      await prisma.order.update({
+        where: { id: designOrder.orderId },
+        data: {
+          proofStatus: 'APPROVED',
+          proofApprovedAt: new Date(),
+          currentDepartment: 'PRODUCTION', // Handover to Pre-Production Gate
+          orderStatus: 'PRE_PRODUCTION_QC',
+        },
+      });
+
+      // Update linked ProductionJob for prepress QC
       await prisma.productionJob.updateMany({
         where: {
           orderId: designOrder.orderId,
           ...(designOrder.orderItemId ? { orderItemId: designOrder.orderItemId } : {}),
         },
         data: {
-          status: 'QUEUED',
+          status: 'PRE_PRODUCTION_QC',
           artworkStatus: 'APPROVED',
           approvedArtworkUrl: latestRevision?.draftFileUrl || null,
           approvedArtworkVersion: `Proof V${latestRevision?.revisionNumber || 1} - Approved`,
@@ -895,15 +895,15 @@ export const approveDesign = async (req, res) => {
       await prisma.orderStatusHistory.create({
         data: {
           orderId: designOrder.orderId,
-          newStatus: 'PRODUCTION_QUEUE',
-          note: `Design Job ${designOrder.designJobNumber} approved. Printing job activated and transferred to Production Queue.`,
+          newStatus: 'PRE_PRODUCTION_QC',
+          note: `Design Job ${designOrder.designJobNumber} approved. Transferred to Pre-Production QC Gate for prepress checklist verification.`,
         },
       });
     }
 
     res.json({
       success: true,
-      message: `Design approved! Printing production job is now activated for press.`,
+      message: `Design approved! Transferred to Pre-Production QC Gate for prepress verification.`,
     });
   } catch (error) {
     console.error('approveDesign error:', error);

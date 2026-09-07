@@ -468,6 +468,8 @@ export const api = {
   // Multi-Department ERP Workflow & Handover
   getWorkflowBoard: () => request('/admin/workflow/board'),
   handoverOrder: (id, handoverData) => request(`/admin/orders/${id}/handover`, { method: 'POST', body: handoverData }),
+  submitPreProductionQC: (id, payload) => request(`/admin/orders/${id}/pre-production-qc`, { method: 'POST', body: payload }),
+  reviewArtwork: (id, payload) => request(`/admin/orders/${id}/artwork-review`, { method: 'POST', body: payload }),
 
   // Customer Auth & Portal (B2B & B2C)
   customerSignup: (data) => request('/customer/auth/signup', { method: 'POST', body: data }),
