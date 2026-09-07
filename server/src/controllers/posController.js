@@ -14,8 +14,7 @@ const prisma = new PrismaClient();
  */
 export const searchCustomers = async (req, res) => {
   try {
-    const { query = '' } = req.query;
-    const cleanQuery = String(query).trim();
+    const cleanQuery = String(req.query.query || req.query.q || '').trim();
 
     if (!cleanQuery || cleanQuery.length < 2) {
       return res.json({
