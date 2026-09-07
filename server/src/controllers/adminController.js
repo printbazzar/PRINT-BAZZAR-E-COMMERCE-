@@ -1008,7 +1008,7 @@ export const updateOrderStatus = async (req, res) => {
       let targetDept = order.currentDepartment;
 
       if (status === 'PRE_PRODUCTION_QC') {
-        targetJobStatus = 'PRE_PRODUCTION_QC';
+        targetJobStatus = 'QC_PENDING';
         targetDept = 'PRODUCTION';
       } else if (status === 'PRODUCTION_QUEUE') {
         targetJobStatus = 'QUEUED';

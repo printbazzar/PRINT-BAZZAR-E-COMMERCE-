@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { TextInput, Select, Button, Spinner } from 'flowbite-react';
 import { HiSearch, HiOutlineEye, HiOutlinePrinter } from 'react-icons/hi';
 import { api } from '../services/api';
+import PreProductionQCModal from '../Components/PreProductionQCModal';
 
 export default function AdminOrders() {
   const [orders, setOrders] = useState([]);
@@ -13,6 +14,8 @@ export default function AdminOrders() {
   const [departmentFilter, setDepartmentFilter] = useState('ALL');
   const [totalOrders, setTotalOrders] = useState(0);
   const [page, setPage] = useState(1);
+  const [selectedQcOrder, setSelectedQcOrder] = useState(null);
+  const [qcModalOpen, setQcModalOpen] = useState(false);
 
   useEffect(() => {
     fetchOrders();
@@ -248,10 +251,22 @@ export default function AdminOrders() {
                       </span>
                     </td>
 
-                    <td className="p-3 text-right">
+                    <td className="p-3 text-right whitespace-nowrap">
+                      {ord.orderStatus === 'PRE_PRODUCTION_QC' && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedQcOrder(ord);
+                            setQcModalOpen(true);
+                          }}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 bg-yellow-400 hover:bg-yellow-500 text-black font-extrabold rounded text-xs animate-pulse mr-1.5 shadow-2xs"
+                        >
+                          🛡️ Pre-QC
+                        </button>
+                      )}
                       <Link
                         to={`/admin/orders/${ord.id}`}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 bg-yellow-400 hover:bg-yellow-500 text-black font-bold rounded text-xs"
+                        className="inline-flex items-center gap-1 px-2.5 py-1 bg-gray-100 hover:bg-gray-200 text-gray-800 font-bold rounded text-xs"
                       >
                         <HiOutlineEye className="w-3.5 h-3.5" /> Details
                       </Link>
@@ -288,6 +303,19 @@ export default function AdminOrders() {
           </div>
         </div>
       )}
+
+      {/* Pre-Production QC Modal */}
+      <PreProductionQCModal
+        show={qcModalOpen}
+        onClose={() => {
+          setQcModalOpen(false);
+          setSelectedQcOrder(null);
+        }}
+        order={selectedQcOrder}
+        onSuccess={() => {
+          fetchOrders();
+        }}
+      />
     </div>
   );
 }

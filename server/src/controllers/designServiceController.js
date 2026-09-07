@@ -885,7 +885,7 @@ export const approveDesign = async (req, res) => {
           ...(designOrder.orderItemId ? { orderItemId: designOrder.orderItemId } : {}),
         },
         data: {
-          status: 'PRE_PRODUCTION_QC',
+          status: 'QC_PENDING',
           artworkStatus: 'APPROVED',
           approvedArtworkUrl: latestRevision?.draftFileUrl || null,
           approvedArtworkVersion: `Proof V${latestRevision?.revisionNumber || 1} - Approved`,

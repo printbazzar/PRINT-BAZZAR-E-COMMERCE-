@@ -19,7 +19,7 @@ export const ALLOWED_ORDER_TRANSITIONS = {
   CUSTOMER_APPROVAL_REQUIRED: ['PRE_PRODUCTION_QC', 'DESIGN_IN_PROGRESS', 'CANCELLED', 'ON_HOLD'],
   REVISION: ['DESIGN_IN_PROGRESS', 'DRAFT_READY', 'SENT_TO_CUSTOMER', 'CANCELLED', 'ON_HOLD'],
   REVISION_REQUESTED: ['DESIGN_IN_PROGRESS', 'DRAFT_READY', 'SENT_TO_CUSTOMER', 'CANCELLED', 'ON_HOLD'],
-  PRE_PRODUCTION_QC: ['PRODUCTION_QUEUE', 'ARTWORK_REVIEW', 'DESIGN_IN_PROGRESS', 'ON_HOLD', 'CANCELLED'],
+  PRE_PRODUCTION_QC: ['PRODUCTION_QUEUE', 'DESIGN_QUEUE', 'ORDER_REVIEW', 'ARTWORK_REVIEW', 'DESIGN_IN_PROGRESS', 'ON_HOLD', 'CANCELLED'],
   PRODUCTION_QUEUE: ['MACHINE_ASSIGNED', 'PRINTING', 'ON_HOLD', 'CANCELLED'],
   MACHINE_ASSIGNED: ['PRINTING', 'PRODUCTION_QUEUE', 'ON_HOLD', 'CANCELLED'],
   PRINTING: ['FINISHING', 'PRINTING_COMPLETED', 'ON_HOLD', 'CANCELLED'],
@@ -55,10 +55,11 @@ export const ALLOWED_ORDER_TRANSITIONS = {
 
 // Explicitly allowed transitions for ProductionJob.status
 export const ALLOWED_JOB_TRANSITIONS = {
-  WAITING_FOR_PAYMENT: ['WAITING_FOR_DESIGN_APPROVAL', 'ARTWORK_REVIEW', 'PRE_PRODUCTION_QC', 'QUEUED'],
-  WAITING_FOR_DESIGN_APPROVAL: ['PRE_PRODUCTION_QC', 'QUEUED', 'ON_HOLD'],
-  ARTWORK_REVIEW: ['PRE_PRODUCTION_QC', 'WAITING_FOR_DESIGN_APPROVAL', 'ON_HOLD'],
-  PRE_PRODUCTION_QC: ['QUEUED', 'ARTWORK_REVIEW', 'WAITING_FOR_DESIGN_APPROVAL', 'ON_HOLD'],
+  WAITING_FOR_PAYMENT: ['WAITING_FOR_DESIGN_APPROVAL', 'ARTWORK_REVIEW', 'PRE_PRODUCTION_QC', 'QC_PENDING', 'QUEUED'],
+  WAITING_FOR_DESIGN_APPROVAL: ['PRE_PRODUCTION_QC', 'QC_PENDING', 'QUEUED', 'ON_HOLD'],
+  ARTWORK_REVIEW: ['PRE_PRODUCTION_QC', 'QC_PENDING', 'WAITING_FOR_DESIGN_APPROVAL', 'ON_HOLD'],
+  PRE_PRODUCTION_QC: ['QUEUED', 'QC_PENDING', 'ARTWORK_REVIEW', 'WAITING_FOR_DESIGN_APPROVAL', 'ON_HOLD'],
+  QC_PENDING: ['QUEUED', 'PRE_PRODUCTION_QC', 'ARTWORK_REVIEW', 'WAITING_FOR_DESIGN_APPROVAL', 'ON_HOLD'],
   QUEUED: ['ASSIGNED', 'MACHINE_ASSIGNED', 'PRINTING', 'ON_HOLD'],
   ASSIGNED: ['PRINTING', 'QUEUED', 'ON_HOLD'],
   MACHINE_ASSIGNED: ['PRINTING', 'QUEUED', 'ON_HOLD'],
@@ -68,7 +69,7 @@ export const ALLOWED_JOB_TRANSITIONS = {
   FINISHING_COMPLETED: ['SENT_TO_QC', 'ON_HOLD'],
   SENT_TO_QC: ['COMPLETED', 'PRINTING', 'FINISHING', 'ON_HOLD'],
   COMPLETED: [],
-  ON_HOLD: ['PRE_PRODUCTION_QC', 'QUEUED', 'PRINTING', 'FINISHING', 'SENT_TO_QC'],
+  ON_HOLD: ['PRE_PRODUCTION_QC', 'QC_PENDING', 'QUEUED', 'PRINTING', 'FINISHING', 'SENT_TO_QC'],
 };
 
 // 12 mandatory checklist keys for Pre-Production QC
@@ -85,6 +86,19 @@ export const MANDATORY_PRE_PRODUCTION_CHECKLIST = [
   'laminationVerification',
   'cuttingFinishingVerification',
   'specialInstructionsVerification',
+];
+
+// Pre-Production QC Verification Requirement Groups (supports both 9-point canonical list and 12-point keys)
+export const PRE_PRODUCTION_QC_GROUPS = [
+  { name: 'correctArtwork', keys: ['correctArtwork', 'correctArtworkVersion'] },
+  { name: 'correctSize', keys: ['correctSize'] },
+  { name: 'correctQuantity', keys: ['correctQuantity'] },
+  { name: 'correctMaterial', keys: ['correctMaterial', 'correctGsm'] },
+  { name: 'colorModeCmyk', keys: ['colorModeCmyk', 'cmykColorVerification', 'cmykColor'] },
+  { name: 'bleedMarginVerification', keys: ['bleedMarginVerification', 'bleedSafeMargin'] },
+  { name: 'spellingContentVerification', keys: ['spellingContentVerification', 'spellingContent', 'resolutionVerification'] },
+  { name: 'finishingVerification', keys: ['finishingVerification', 'cuttingFinishingVerification', 'laminationVerification'] },
+  { name: 'customerApprovedArtwork', keys: ['customerApprovedArtwork', 'customerApprovalVerification', 'customerApproval', 'specialInstructionsVerification'] },
 ];
 
 /**
@@ -161,9 +175,10 @@ export function validateJobTransition(currentStatus, targetStatus) {
 export function validatePreProductionChecklist(checklist = {}) {
   const missingKeys = [];
 
-  for (const key of MANDATORY_PRE_PRODUCTION_CHECKLIST) {
-    if (checklist[key] !== true) {
-      missingKeys.push(key);
+  for (const group of PRE_PRODUCTION_QC_GROUPS) {
+    const isGroupSatisfied = group.keys.some((k) => checklist[k] === true);
+    if (!isGroupSatisfied) {
+      missingKeys.push(group.name);
     }
   }
 

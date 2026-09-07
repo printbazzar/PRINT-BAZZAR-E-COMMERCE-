@@ -19,6 +19,7 @@ import {
 import { api } from '../services/api';
 import ShippingLabelModal from '../Components/ShippingLabelModal';
 import JobCardModal from '../Components/JobCardModal';
+import PreProductionQCModal from '../Components/PreProductionQCModal';
 import { useBusinessInfo } from '../context/BusinessInfoContext';
 
 const COURIER_PARTNERS = [
@@ -50,6 +51,7 @@ export default function AdminOrderDetail() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [shippingModalOpen, setShippingModalOpen] = useState(false);
   const [jobCardModalOpen, setJobCardModalOpen] = useState(false);
+  const [preQcModalOpen, setPreQcModalOpen] = useState(false);
 
   // Production Job state
   const [selectedMachine, setSelectedMachine] = useState(PRESS_MACHINES[1]);
@@ -375,6 +377,16 @@ export default function AdminOrderDetail() {
           >
             <HiOutlineDocumentText className="w-4 h-4 mr-1 text-gray-500" /> Print Job Ticket
           </Button>
+          {order.orderStatus === 'PRE_PRODUCTION_QC' && (
+            <Button
+              onClick={() => setPreQcModalOpen(true)}
+              color="warning"
+              size="sm"
+              className="text-xs font-black bg-yellow-400 hover:bg-yellow-500 text-black animate-pulse"
+            >
+              🛡️ Pre-Production QC
+            </Button>
+          )}
           <Button
             onClick={() => setShippingModalOpen(true)}
             color="light"
@@ -385,6 +397,31 @@ export default function AdminOrderDetail() {
           </Button>
         </div>
       </div>
+
+      {/* Pre-Production QC Mandatory Gating Banner */}
+      {order.orderStatus === 'PRE_PRODUCTION_QC' && (
+        <div className="bg-yellow-50 border-2 border-yellow-400 rounded-xl p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 shadow-xs">
+          <div className="flex items-center gap-3">
+            <span className="text-3xl">🛡️</span>
+            <div>
+              <h3 className="text-sm font-black text-yellow-950 uppercase tracking-wide">
+                Action Required: Pre-Production QC Gate
+              </h3>
+              <p className="text-xs text-yellow-800">
+                Customer proof is approved. Physical printing is strictly gated until all 9 prepress checklist items are verified and signed off.
+              </p>
+            </div>
+          </div>
+          <Button
+            color="warning"
+            size="sm"
+            onClick={() => setPreQcModalOpen(true)}
+            className="font-black text-black bg-yellow-400 hover:bg-yellow-500 flex-shrink-0"
+          >
+            🛡️ Open Pre-Production QC
+          </Button>
+        </div>
+      )}
 
       {feedback && (
         <div className="bg-green-50 border border-green-200 text-green-800 text-xs font-semibold p-3 rounded-lg flex items-center gap-2">
@@ -1376,6 +1413,17 @@ export default function AdminOrderDetail() {
         onClose={() => setJobCardModalOpen(false)}
         order={order}
         job={currentJob}
+      />
+
+      {/* Pre-Production QC Prepress Gate Modal */}
+      <PreProductionQCModal
+        show={preQcModalOpen}
+        onClose={() => setPreQcModalOpen(false)}
+        order={order}
+        onSuccess={(msg) => {
+          showFeedbackMsg(msg);
+          fetchOrderDetail();
+        }}
       />
     </div>
   );

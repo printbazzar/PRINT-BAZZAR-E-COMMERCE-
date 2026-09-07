@@ -14,6 +14,7 @@ import {
 } from 'react-icons/hi';
 import { api } from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import PreProductionQCModal from '../Components/PreProductionQCModal';
 
 const DEPARTMENTS = [
   {
@@ -90,6 +91,8 @@ export default function AdminWorkflowBoard() {
   // Handover Modal State
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [handoverModalOpen, setHandoverModalOpen] = useState(false);
+  const [selectedQcOrder, setSelectedQcOrder] = useState(null);
+  const [preQcModalOpen, setPreQcModalOpen] = useState(false);
   const [targetDept, setTargetDept] = useState('PRODUCTION');
   const [targetStatus, setTargetStatus] = useState('PRINTING');
   const [assignedStaff, setAssignedStaff] = useState('');
@@ -357,16 +360,29 @@ export default function AdminWorkflowBoard() {
                           </div>
                         )}
 
-                        {/* Handover Button CTA */}
+                        {/* Handover / Pre-QC Button CTA */}
                         <div className="pt-2 border-t flex justify-between items-center">
                           <span className="font-black text-red-600 text-xs">₹{ord.grandTotal}</span>
-                          <button
-                            type="button"
-                            onClick={() => openHandover(ord, dept.key)}
-                            className="inline-flex items-center gap-1 bg-yellow-400 hover:bg-yellow-500 text-black font-extrabold text-[10px] px-2.5 py-1 rounded-lg transition-colors shadow-2xs"
-                          >
-                            Handover ➔
-                          </button>
+                          {ord.orderStatus === 'PRE_PRODUCTION_QC' ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedQcOrder(ord);
+                                setPreQcModalOpen(true);
+                              }}
+                              className="inline-flex items-center gap-1 bg-yellow-400 hover:bg-yellow-500 text-black font-extrabold text-[10px] px-2.5 py-1 rounded-lg transition-colors shadow-2xs animate-pulse"
+                            >
+                              🛡️ Pre-QC ➔
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => openHandover(ord, dept.key)}
+                              className="inline-flex items-center gap-1 bg-yellow-400 hover:bg-yellow-500 text-black font-extrabold text-[10px] px-2.5 py-1 rounded-lg transition-colors shadow-2xs"
+                            >
+                              Handover ➔
+                            </button>
+                          )}
                         </div>
                       </div>
                     ))
@@ -548,6 +564,21 @@ export default function AdminWorkflowBoard() {
           </Modal.Footer>
         </form>
       </Modal>
+
+      {/* Pre-Production QC Prepress Gate Modal */}
+      <PreProductionQCModal
+        show={preQcModalOpen}
+        onClose={() => {
+          setPreQcModalOpen(false);
+          setSelectedQcOrder(null);
+        }}
+        order={selectedQcOrder}
+        onSuccess={(msg) => {
+          setFeedback(msg);
+          setTimeout(() => setFeedback(''), 4000);
+          fetchBoard();
+        }}
+      />
     </div>
   );
 }

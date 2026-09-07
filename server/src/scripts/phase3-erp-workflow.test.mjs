@@ -21,6 +21,7 @@ import app from '../server.js';
 import { signAccessToken } from '../config/jwt.js';
 
 const prisma = new PrismaClient();
+process.env.RAZORPAY_WEBHOOK_SECRET = process.env.RAZORPAY_WEBHOOK_SECRET || 'phase3_test_webhook_secret_key';
 
 // Helper assertion function
 function assert(condition, message) {
@@ -44,6 +45,7 @@ async function runTestSuite() {
   const createdOrderIds = [];
   const createdCustomerIds = [];
   const testRunId = Date.now().toString().slice(-6);
+  let testError = null;
 
   try {
     // 1. Resolve Staff Users & Generate Department Tokens
@@ -226,8 +228,9 @@ async function runTestSuite() {
       `CRITICAL VIOLATION: Order must move strictly to PRE_PRODUCTION_QC, but found '${dbOrderBAfterApproval.orderStatus}'!`
     );
     assert(
-      dbOrderBAfterApproval.productionJobs[0].status === 'PRE_PRODUCTION_QC',
-      `ProductionJob status must synchronize to PRE_PRODUCTION_QC, but found '${dbOrderBAfterApproval.productionJobs[0].status}'`
+      dbOrderBAfterApproval.productionJobs[0].status === 'QC_PENDING' ||
+        dbOrderBAfterApproval.productionJobs[0].status === 'PRE_PRODUCTION_QC',
+      `ProductionJob status must synchronize to QC_PENDING / PRE_PRODUCTION_QC, but found '${dbOrderBAfterApproval.productionJobs[0].status}'`
     );
     assert(
       dbOrderBAfterApproval.productionJobs[0].artworkStatus === 'APPROVED',
@@ -311,6 +314,83 @@ async function runTestSuite() {
     assert(dbOrderBReleased.orderStatus === 'PRODUCTION_QUEUE', 'Order must enter PRODUCTION_QUEUE');
     assert(dbOrderBReleased.productionJobs[0].status === 'QUEUED', 'ProductionJob must enter QUEUED');
     console.log('✅ PASS: 12-point Pre-Production QC verified and order released to PRODUCTION_QUEUE.');
+
+    // ----------------------------------------------------
+    // TEST E2: Pre-Production QC Return to Appropriate Department
+    // ----------------------------------------------------
+    console.log('\n[TEST E2] Pre-Production QC Return Routing...');
+    // Create temporary order in PRE_PRODUCTION_QC to test return routing
+    const resCreateReturnTest = await fetch(`${baseUrl}/api/v1/orders`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        customerName: 'Test Customer Return',
+        customerMobile: '9988776633',
+        customerEmail: `test_p3_return_${testRunId}@printbazzar.com`,
+        shippingAddress: { street: '12 Test St', city: 'Trichy', state: 'Tamil Nadu', pincode: '620008' },
+        paymentMethod: 'UPI',
+        items: [{ productId: testProduct.id, quantity: 50, selectedOptions: { Size: 'Standard' }, designRequired: true }],
+      }),
+    });
+    const orderReturnTest = (await resCreateReturnTest.json()).order;
+    createdOrderIds.push(orderReturnTest.id);
+
+    // Transition to PRE_PRODUCTION_QC
+    await prisma.order.update({
+      where: { id: orderReturnTest.id },
+      data: { orderStatus: 'PRE_PRODUCTION_QC', currentDepartment: 'PRODUCTION' },
+    });
+    await prisma.productionJob.updateMany({
+      where: { orderId: orderReturnTest.id },
+      data: { status: 'QC_PENDING' },
+    });
+
+    // 1. Return to Design
+    const resReturnDesign = await fetch(`${baseUrl}/api/v1/admin/orders/${orderReturnTest.id}/pre-production-qc`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${designToken}` },
+      body: JSON.stringify({
+        action: 'RETURN_TO_DESIGN',
+        notes: 'Logo resolution is below 300DPI, please revise.',
+      }),
+    });
+    assert(resReturnDesign.status === 200, `Expected 200 on return to design, got ${resReturnDesign.status}`);
+    const dbOrderAfterReturnDesign = await prisma.order.findUnique({
+      where: { id: orderReturnTest.id },
+      include: { productionJobs: true },
+    });
+    assert(dbOrderAfterReturnDesign.orderStatus === 'DESIGN_QUEUE', 'Order must return to DESIGN_QUEUE');
+    assert(dbOrderAfterReturnDesign.currentDepartment === 'DESIGN', 'Department must return to DESIGN');
+    assert(dbOrderAfterReturnDesign.productionJobs[0].status === 'WAITING_FOR_DESIGN_APPROVAL', 'Job must synchronize to WAITING_FOR_DESIGN_APPROVAL');
+    console.log('✅ PASS: QC Return to Design correctly routed order to DESIGN_QUEUE with synchronized job.');
+
+    // Move back to PRE_PRODUCTION_QC and test 2. Return to Artwork Review
+    await prisma.order.update({
+      where: { id: orderReturnTest.id },
+      data: { orderStatus: 'PRE_PRODUCTION_QC', currentDepartment: 'PRODUCTION' },
+    });
+    await prisma.productionJob.updateMany({
+      where: { orderId: orderReturnTest.id },
+      data: { status: 'QC_PENDING' },
+    });
+
+    const resReturnArtwork = await fetch(`${baseUrl}/api/v1/admin/orders/${orderReturnTest.id}/pre-production-qc`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${designToken}` },
+      body: JSON.stringify({
+        action: 'RETURN_TO_ARTWORK_REVIEW',
+        notes: 'Bleed margin truncated by 2mm, re-check customer upload.',
+      }),
+    });
+    assert(resReturnArtwork.status === 200, `Expected 200 on return to artwork review, got ${resReturnArtwork.status}`);
+    const dbOrderAfterReturnArtwork = await prisma.order.findUnique({
+      where: { id: orderReturnTest.id },
+      include: { productionJobs: true },
+    });
+    assert(dbOrderAfterReturnArtwork.orderStatus === 'ORDER_REVIEW', 'Order must return to ORDER_REVIEW');
+    assert(dbOrderAfterReturnArtwork.currentDepartment === 'DESIGN', 'Department must return to DESIGN');
+    assert(dbOrderAfterReturnArtwork.productionJobs[0].status === 'ARTWORK_REVIEW', 'Job must synchronize to ARTWORK_REVIEW');
+    console.log('✅ PASS: QC Return to Artwork Review correctly routed order to ORDER_REVIEW with synchronized job.');
 
     // ----------------------------------------------------
     // TEST F: Attempted Illegal Status Jump Prevention
@@ -443,6 +523,44 @@ async function runTestSuite() {
     console.log('✅ PASS: Order and ProductionJob synchronized through all production milestones.');
 
     // ----------------------------------------------------
+    // TEST G2: Printing Cannot Start Before QC Approval
+    // ----------------------------------------------------
+    console.log('\n[TEST G2] Printing Cannot Start Before QC Approval...');
+    // Create an order in PRE_PRODUCTION_QC and verify direct jump to PRINTING is rejected with 400
+    const resCreatePreQC = await fetch(`${baseUrl}/api/v1/orders`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        customerName: 'Test Printing Guard',
+        customerMobile: '9988776622',
+        customerEmail: `test_p3_guard_${testRunId}@printbazzar.com`,
+        shippingAddress: { street: '12 Guard St', city: 'Trichy', state: 'Tamil Nadu', pincode: '620008' },
+        paymentMethod: 'UPI',
+        items: [{ productId: testProduct.id, quantity: 100, selectedOptions: { Size: 'Standard' }, designRequired: false }],
+      }),
+    });
+    const orderGuard = (await resCreatePreQC.json()).order;
+    createdOrderIds.push(orderGuard.id);
+
+    await prisma.order.update({
+      where: { id: orderGuard.id },
+      data: { orderStatus: 'PRE_PRODUCTION_QC', currentDepartment: 'PRODUCTION' },
+    });
+
+    const resPrematurePrint = await fetch(`${baseUrl}/api/v1/admin/orders/${orderGuard.id}/handover`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${pressToken}` },
+      body: JSON.stringify({
+        targetDepartment: 'PRODUCTION',
+        newStatus: 'PRINTING',
+      }),
+    });
+    assert(resPrematurePrint.status === 400, `Expected 400 when attempting to print before QC, got ${resPrematurePrint.status}`);
+    const dataPrematurePrint = await resPrematurePrint.json();
+    assert(dataPrematurePrint.success === false, 'Printing before QC approval must be blocked');
+    console.log('✅ PASS: Printing cannot start before Pre-Production QC approval (HTTP 400 strictly enforced).');
+
+    // ----------------------------------------------------
     // TEST H: Duplicate Workflow Request Idempotency
     // ----------------------------------------------------
     console.log('\n[TEST H] Duplicate Workflow Request Idempotency...');
@@ -484,6 +602,25 @@ async function runTestSuite() {
     console.log('✅ PASS: Cross-department unauthorized workflow action rejected with HTTP 403.');
 
     // ----------------------------------------------------
+    // TEST K: Payment Safety & Protection Preservation (Phase 2.5)
+    // ----------------------------------------------------
+    console.log('\n[TEST K] Payment Workflow & Protection Preservation...');
+    // Attempt webhook with forged signature (must be rejected)
+    const resForgedWebhook = await fetch(`${baseUrl}/api/v1/payments/webhook`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-razorpay-signature': 'forged_fake_signature_hash_12345',
+      },
+      body: JSON.stringify({
+        event: 'payment.captured',
+        payload: { payment: { entity: { id: 'pay_fake_123', order_id: 'order_fake_123' } } },
+      }),
+    });
+    assert(resForgedWebhook.status === 400, `Expected 400 on forged webhook signature, got ${resForgedWebhook.status}`);
+    console.log('✅ PASS: Payment webhook signature verification strictly enforced (Forged webhook rejected).');
+
+    // ----------------------------------------------------
     // TEST J: Final Production Release, Delivery & Job Card Completeness
     // ----------------------------------------------------
     console.log('\n[TEST J] Job Card Completeness & Financial State...');
@@ -510,6 +647,8 @@ async function runTestSuite() {
     console.log('\n====================================================');
     console.log('🎉 ALL 10 PHASE 3 AUTOMATED TESTS PASSED (100% SUCCESS)');
     console.log('====================================================');
+  } catch (err) {
+    testError = err;
   } finally {
     // Clean up temporary server
     server.close();
@@ -541,6 +680,12 @@ async function runTestSuite() {
     }
     console.log('✔ Synthetic test orders cleaned up successfully.');
     await prisma.$disconnect();
+    if (testError) {
+      console.error('\n❌ TEST RUN FAILED WITH ERROR:', testError);
+      process.exit(1);
+    } else {
+      process.exit(0);
+    }
   }
 }
 

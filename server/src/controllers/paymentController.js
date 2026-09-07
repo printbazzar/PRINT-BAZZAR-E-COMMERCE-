@@ -614,7 +614,7 @@ export const handlePaymentWebhook = async (req, res) => {
   try {
     const signature = req.headers['x-razorpay-signature'];
     const config = await getGatewayConfig();
-    const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET || config.keySecret;
+    const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET || config.webhookSecret || config.keySecret;
 
     // 1. Strict Cryptographic Signature Verification
     if (webhookSecret) {
