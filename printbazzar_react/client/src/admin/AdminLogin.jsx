@@ -21,8 +21,13 @@ export default function AdminLogin() {
     setError('');
 
     try {
-      await login(email, password);
-      const destination = location.state?.from?.pathname || '/admin/dashboard';
+      const res = await login(email, password);
+      const user = res?.user;
+      const isSuper = user?.role?.toLowerCase().includes('super') || user?.role === 'SUPER_ADMIN' || user?.department === 'ALL';
+      let destination = location.state?.from?.pathname;
+      if (!destination || destination === '/admin/login') {
+        destination = isSuper ? '/admin/dashboard' : '/admin/queue';
+      }
       navigate(destination, { replace: true });
     } catch (err) {
       setError(err.message || 'Invalid administrator credentials.');

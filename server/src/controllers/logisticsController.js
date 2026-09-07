@@ -71,6 +71,29 @@ export const completePacking = async (req, res) => {
       packingChecklist,
     } = req.body;
 
+    const parsedWeight = parseFloat(packageWeightKg);
+    if (isNaN(parsedWeight) || parsedWeight <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Valid parcel weight (in kg, e.g. 0.5) is required.',
+      });
+    }
+
+    if (!boxDimensions || typeof boxDimensions !== 'string' || !boxDimensions.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Box dimensions (e.g. 30x20x10 cm) are required.',
+      });
+    }
+
+    const parsedCount = parseInt(packageCount, 10);
+    if (isNaN(parsedCount) || parsedCount < 1) {
+      return res.status(400).json({
+        success: false,
+        message: 'Package count must be at least 1.',
+      });
+    }
+
     const order = await prisma.order.findUnique({
       where: { id: orderId },
       include: { shipments: true },
@@ -82,8 +105,8 @@ export const completePacking = async (req, res) => {
 
     const isPickup = order.deliveryMethod === 'STORE_PICKUP';
     const nextStatus = 'READY_FOR_DELIVERY';
-    const nextDept = isPickup ? 'DELIVERY' : 'DELIVERY';
-    const packingWeightText = `${packageWeightKg || 0.5} kg (${packageCount} parcel${packageCount > 1 ? 's' : ''})`;
+    const nextDept = 'DELIVERY';
+    const packingWeightText = `${parsedWeight} kg (${parsedCount} parcel${parsedCount > 1 ? 's' : ''})`;
 
     // Update parent order
     await prisma.order.update({
@@ -255,55 +278,225 @@ export const dispatchCourier = async (req, res) => {
 export const handoverStorePickup = async (req, res) => {
   try {
     const { orderId } = req.params;
-    const { verifiedCustomerName, handoverStaffName } = req.body;
+    const {
+      verifiedCustomerName,
+      handoverStaffName,
+      collectBalanceAtCounter,
+      counterPaymentMethod = 'CASH', // 'CASH' | 'UPI' | 'CARD' | 'OTHER'
+      counterPaymentReference,
+      counterPaymentNotes,
+    } = req.body;
+
+    if (!verifiedCustomerName || !verifiedCustomerName.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Customer verification name is mandatory to complete store pickup handover.',
+      });
+    }
+
+    const staffName = handoverStaffName || req.user?.name;
+    if (!staffName || !staffName.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Staff handover confirmation (operator/manager name) is required.',
+      });
+    }
 
     const order = await prisma.order.findUnique({
       where: { id: orderId },
-      include: { shipments: true },
+      include: {
+        shipments: true,
+        invoices: { orderBy: { createdAt: 'desc' }, take: 1 },
+      },
     });
 
     if (!order) {
       return res.status(404).json({ success: false, message: 'Order not found.' });
     }
 
-    const now = new Date();
+    const invoice = order.invoices?.[0];
+    let balanceDue = 0;
+    if (invoice) {
+      balanceDue = typeof invoice.balanceDue === 'number' ? invoice.balanceDue : 0;
+    } else if (order.paymentStatus !== 'PAID') {
+      balanceDue = order.grandTotal || 0;
+    }
 
-    // Complete order
-    const updatedOrder = await prisma.order.update({
-      where: { id: orderId },
-      data: {
-        orderStatus: 'DELIVERED',
-        currentDepartment: 'COMPLETED',
-        pickedUpAt: now,
-        pickupVerifiedBy: handoverStaffName || req.user?.name || 'Store Manager',
-        statusHistory: {
-          create: {
-            newStatus: 'DELIVERED',
-            note: `Store Pickup Complete. Handed over to customer (${verifiedCustomerName || order.customerName}) at Trichy facility.`,
-            changedByUserId: req.user?.id || null,
+    const isCodOrExempt = order.paymentMethod === 'COD' || order.paymentStatus === 'COD_CONFIRMED';
+    const isBalanceZero = balanceDue <= 0 || order.paymentStatus === 'PAID';
+
+    // 1. If balance is due and order is not exempt, require counter payment collection
+    if (!isBalanceZero && !isCodOrExempt) {
+      if (!collectBalanceAtCounter) {
+        return res.status(400).json({
+          success: false,
+          requiresBalancePayment: true,
+          balanceDue,
+          message: `Cannot complete store pickup handover: Outstanding balance of ₹${balanceDue.toFixed(2)} must be collected first.`,
+        });
+      }
+
+      const validMethods = ['CASH', 'UPI', 'CARD', 'OTHER'];
+      const method = validMethods.includes(counterPaymentMethod?.toUpperCase())
+        ? counterPaymentMethod.toUpperCase()
+        : 'CASH';
+
+      const now = new Date();
+      const updated = await prisma.$transaction(async (tx) => {
+        if (invoice) {
+          await tx.invoice.update({
+            where: { id: invoice.id },
+            data: {
+              amountPaid: (invoice.amountPaid || 0) + balanceDue,
+              balanceDue: 0,
+              paymentStatus: 'PAID',
+              paymentMethod: method,
+              transactionReference: counterPaymentReference || `COUNTER-${method}-${Date.now()}`,
+            },
+          });
+        }
+
+        const ord = await tx.order.update({
+          where: { id: orderId },
+          data: {
+            paymentStatus: 'PAID',
+            orderStatus: 'DELIVERED',
+            currentDepartment: 'COMPLETED',
+            pickedUpAt: now,
+            pickupVerifiedBy: staffName,
+            statusHistory: {
+              create: [
+                {
+                  newStatus: 'PAID',
+                  note: `Outstanding balance of ₹${balanceDue.toFixed(2)} collected at Trichy pickup counter via ${method}. ${
+                    counterPaymentReference ? `Ref: ${counterPaymentReference}. ` : ''
+                  }${counterPaymentNotes ? `Notes: ${counterPaymentNotes}` : ''}`,
+                  changedByUserId: req.user?.id || null,
+                },
+                {
+                  newStatus: 'DELIVERED',
+                  note: `Store Pickup Complete. Handed over to verified customer (${verifiedCustomerName.trim()}) by ${staffName}. All balances settled.`,
+                  changedByUserId: req.user?.id || null,
+                },
+              ],
+            },
           },
-        },
-      },
-    });
+        });
 
-    // Update shipment
-    if (order.shipments?.length > 0) {
-      await prisma.shipment.update({
-        where: { id: order.shipments[0].id },
-        data: {
-          status: 'PICKED_UP',
-          pickedUpAt: now,
-          handoverStaffName: handoverStaffName || req.user?.name || 'Store Manager',
-          verifiedCustomerName: verifiedCustomerName || order.customerName,
-          deliveredAt: now,
-        },
+        if (order.shipments?.length > 0) {
+          await tx.shipment.update({
+            where: { id: order.shipments[0].id },
+            data: {
+              status: 'PICKED_UP',
+              pickedUpAt: now,
+              handoverStaffName: staffName,
+              verifiedCustomerName: verifiedCustomerName.trim(),
+              deliveredAt: now,
+            },
+          });
+        }
+
+        await tx.auditLog.create({
+          data: {
+            action: 'COUNTER_BALANCE_COLLECTED',
+            entityName: 'Order',
+            entityId: orderId,
+            userId: req.user?.id || null,
+            oldValues: JSON.stringify({ balanceDue, paymentStatus: order.paymentStatus }),
+            newValues: JSON.stringify({
+              amountCollected: balanceDue,
+              paymentMethod: method,
+              counterPaymentReference,
+              collector: staffName,
+            }),
+            ipAddress: req.ip || '127.0.0.1',
+          },
+        });
+
+        await tx.auditLog.create({
+          data: {
+            action: 'STORE_PICKUP_COMPLETED',
+            entityName: 'Order',
+            entityId: orderId,
+            userId: req.user?.id || null,
+            oldValues: JSON.stringify({ status: order.orderStatus, department: order.currentDepartment }),
+            newValues: JSON.stringify({
+              status: 'DELIVERED',
+              department: 'COMPLETED',
+              verifiedCustomerName: verifiedCustomerName.trim(),
+              handoverStaff: staffName,
+            }),
+            ipAddress: req.ip || '127.0.0.1',
+          },
+        });
+
+        return ord;
+      });
+
+      return res.json({
+        success: true,
+        message: `Outstanding balance of ₹${balanceDue.toFixed(2)} collected via ${method}. Store pickup completed successfully!`,
+        order: updated,
       });
     }
 
+    // Standard zero-balance or exempt handover
+    const now = new Date();
+    const updated = await prisma.$transaction(async (tx) => {
+      const ord = await tx.order.update({
+        where: { id: orderId },
+        data: {
+          orderStatus: 'DELIVERED',
+          currentDepartment: 'COMPLETED',
+          pickedUpAt: now,
+          pickupVerifiedBy: staffName,
+          statusHistory: {
+            create: {
+              newStatus: 'DELIVERED',
+              note: `Store Pickup Complete. Handed over to verified customer (${verifiedCustomerName.trim()}) at Trichy facility by ${staffName}.`,
+              changedByUserId: req.user?.id || null,
+            },
+          },
+        },
+      });
+
+      if (order.shipments?.length > 0) {
+        await tx.shipment.update({
+          where: { id: order.shipments[0].id },
+          data: {
+            status: 'PICKED_UP',
+            pickedUpAt: now,
+            handoverStaffName: staffName,
+            verifiedCustomerName: verifiedCustomerName.trim(),
+            deliveredAt: now,
+          },
+        });
+      }
+
+      await tx.auditLog.create({
+        data: {
+          action: 'STORE_PICKUP_COMPLETED',
+          entityName: 'Order',
+          entityId: orderId,
+          userId: req.user?.id || null,
+          oldValues: JSON.stringify({ status: order.orderStatus, department: order.currentDepartment }),
+          newValues: JSON.stringify({
+            status: 'DELIVERED',
+            department: 'COMPLETED',
+            verifiedCustomerName: verifiedCustomerName.trim(),
+            handoverStaff: staffName,
+          }),
+          ipAddress: req.ip || '127.0.0.1',
+        },
+      });
+
+      return ord;
+    });
+
     return res.json({
       success: true,
-      message: 'Store pickup handed over successfully. Order marked COMPLETED!',
-      order: updatedOrder,
+      message: `Store pickup handed over to ${verifiedCustomerName.trim()}. Order marked COMPLETED!`,
+      order: updated,
     });
   } catch (error) {
     console.error('handoverStorePickup error:', error);

@@ -24,6 +24,17 @@ export const getQCQueue = async (req, res) => {
             deliveryType: true,
             deliveryMethod: true,
             orderStatus: true,
+            currentDepartment: true,
+            items: {
+              select: {
+                id: true,
+                productNameSnapshot: true,
+                quantity: true,
+                optionsSnapshot: true,
+                specificationsSnapshot: true,
+                artworkFileUrl: true,
+              },
+            },
           },
         },
         productionJob: {
@@ -161,6 +172,23 @@ export const submitQCInspection = async (req, res) => {
         },
       });
     }
+
+    await prisma.auditLog.create({
+      data: {
+        action: status === 'PASSED' ? 'QC_INSPECTION_PASSED' : 'QC_INSPECTION_FAILED',
+        entityName: 'Order',
+        entityId: qcTicket.orderId,
+        userId: req.user?.id || null,
+        oldValues: JSON.stringify({ qcStatus: qcTicket.status, orderStatus: qcTicket.order?.orderStatus }),
+        newValues: JSON.stringify({
+          qcStatus: status,
+          inspector: inspectorName || req.user?.name || 'QC Lead',
+          failureReason: status === 'FAILED' ? failureReason : null,
+          failureNotes: status === 'FAILED' ? failureNotes : null,
+        }),
+        ipAddress: req.ip || '127.0.0.1',
+      },
+    });
 
     return res.json({
       success: true,

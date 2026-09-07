@@ -102,6 +102,18 @@ export const getWorkflowBoard = async (req, res) => {
           take: 1,
           orderBy: { createdAt: 'asc' },
         },
+        invoices: {
+          take: 1,
+          orderBy: { createdAt: 'desc' },
+        },
+        shipments: {
+          take: 1,
+          orderBy: { createdAt: 'desc' },
+        },
+        qualityChecks: {
+          take: 1,
+          orderBy: { createdAt: 'desc' },
+        },
         statusHistory: {
           orderBy: { createdAt: 'desc' },
           take: 3,
@@ -292,6 +304,36 @@ export const handoverOrder = async (req, res) => {
             ...(proofStatus === 'APPROVED' ? { artworkStatus: 'APPROVED' } : {}),
           },
         });
+      }
+
+      if (targetJobStatus === 'SENT_TO_QC' || effectiveStatus === 'QC' || effectiveStatus === 'QUALITY_CHECK') {
+        const existingQC = await tx.qualityCheck.findFirst({
+          where: { orderId: id, status: 'PENDING' },
+        });
+        if (!existingQC) {
+          const currentYear = new Date().getFullYear();
+          const qcCount = await tx.qualityCheck.count();
+          const qcNumber = `PB-QC-${currentYear}-${String(qcCount + 1).padStart(5, '0')}`;
+          await tx.qualityCheck.create({
+            data: {
+              qcNumber,
+              orderId: id,
+              productionJobId: order.productionJobs?.[0]?.id || null,
+              status: 'PENDING',
+              checklistJson: JSON.stringify({
+                correctQuantity: null,
+                correctSize: null,
+                correctMaterial: null,
+                correctColour: null,
+                correctLamination: null,
+                correctFinishing: null,
+                noDamage: null,
+                correctCustomization: null,
+                matchesApprovedArtwork: null,
+              }),
+            },
+          });
+        }
       }
 
       await tx.auditLog.create({

@@ -40,23 +40,60 @@ export default function AdminLayout() {
     return null;
   }
 
-  const navItems = [
-    { label: 'Dashboard', path: '/admin/dashboard', icon: HiOutlineViewGrid },
-    { label: 'Factory Staff Queue', path: '/admin/queue', icon: HiOutlineClipboardList },
-    { label: 'ERP Workflow (Kanban)', path: '/admin/workflow', icon: HiOutlineClipboardList },
-    { label: 'Orders List', path: '/admin/orders', icon: HiOutlineClipboardList },
-    { label: 'Staff & Roles', path: '/admin/staff', icon: HiOutlineUserGroup },
-    { label: 'Products CMS', path: '/admin/products', icon: HiOutlineShoppingBag },
-    { label: 'Option Masters', path: '/admin/options-master', icon: HiOutlineCollection },
-    { label: 'Pricing Master', path: '/admin/pricing', icon: HiOutlineCurrencyRupee },
-    { label: 'Design Services', path: '/admin/design-services', icon: HiOutlineSparkles },
-    { label: 'Categories', path: '/admin/categories', icon: HiHome },
-    { label: 'Banners CMS', path: '/admin/banners', icon: HiOutlinePhotograph },
-    { label: 'Store Settings', path: '/admin/settings', icon: HiOutlineCog },
-    { label: 'Business & Contact Info', path: '/admin/business-settings', icon: HiOutlineOfficeBuilding },
-    { label: 'Footer Management', path: '/admin/footer-settings', icon: HiOutlineCollection },
-    { label: 'Audit Logs', path: '/admin/audit-logs', icon: HiOutlineDocumentReport },
-  ];
+  const isSuperAdmin =
+    adminUser?.role?.toLowerCase().includes('super') ||
+    adminUser?.role === 'SUPER_ADMIN' ||
+    adminUser?.department === 'ALL';
+  const department = adminUser?.department;
+
+  // Auto-redirect floor staff directly to their workstation queue
+  React.useEffect(() => {
+    if (!loading && isAuthenticated && !isSuperAdmin) {
+      if (location.pathname === '/admin' || location.pathname === '/admin/dashboard') {
+        navigate('/admin/queue', { replace: true });
+      }
+    }
+  }, [loading, isAuthenticated, isSuperAdmin, location.pathname, navigate]);
+
+  // Department workstation labels
+  const deptWorkstationLabels = {
+    PRODUCTION: '🖨️ Press Room Station',
+    FINISHING_QC: '✂️ Finishing & QC Desk',
+    PACKING: '📦 Packaging Desk',
+    DELIVERY: '🚚 Logistics & Dispatch',
+    DESIGN: '🎨 Prepress & Design Desk',
+  };
+
+  // Role-based navigation items
+  let navItems = [];
+  if (isSuperAdmin) {
+    navItems = [
+      { label: 'Dashboard', path: '/admin/dashboard', icon: HiOutlineViewGrid },
+      { label: 'Factory Staff Queue', path: '/admin/queue', icon: HiOutlineClipboardList },
+      { label: 'ERP Workflow (Kanban)', path: '/admin/workflow', icon: HiOutlineClipboardList },
+      { label: 'Orders List', path: '/admin/orders', icon: HiOutlineShoppingBag },
+      { label: 'Staff & Roles', path: '/admin/staff', icon: HiOutlineUserGroup },
+      { label: 'Products CMS', path: '/admin/products', icon: HiOutlineShoppingBag },
+      { label: 'Option Masters', path: '/admin/options-master', icon: HiOutlineCollection },
+      { label: 'Pricing Master', path: '/admin/pricing', icon: HiOutlineCurrencyRupee },
+      { label: 'Design Services', path: '/admin/design-services', icon: HiOutlineSparkles },
+      { label: 'Categories', path: '/admin/categories', icon: HiHome },
+      { label: 'Banners CMS', path: '/admin/banners', icon: HiOutlinePhotograph },
+      { label: 'Store Settings', path: '/admin/settings', icon: HiOutlineCog },
+      { label: 'Business & Contact Info', path: '/admin/business-settings', icon: HiOutlineOfficeBuilding },
+      { label: 'Footer Management', path: '/admin/footer-settings', icon: HiOutlineCollection },
+      { label: 'Audit Logs', path: '/admin/audit-logs', icon: HiOutlineDocumentReport },
+    ];
+  } else {
+    const workstationTitle = deptWorkstationLabels[department] || 'Factory Workstation';
+    navItems = [
+      { label: workstationTitle, path: '/admin/queue', icon: HiOutlineClipboardList },
+      { label: 'Orders List', path: '/admin/orders', icon: HiOutlineShoppingBag },
+    ];
+    if (department === 'DESIGN') {
+      navItems.push({ label: 'Design Services Master', path: '/admin/design-services', icon: HiOutlineSparkles });
+    }
+  }
 
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col md:flex-row">
