@@ -55,6 +55,7 @@ const AdminProductConfigurator = lazy(() => import("./admin/AdminProductConfigur
 const AdminOptionMasterManager = lazy(() => import("./admin/AdminOptionMasterManager"));
 const AdminPOS = lazy(() => import("./admin/AdminPOS"));
 const AdminFrontOfficeDashboard = lazy(() => import("./admin/AdminFrontOfficeDashboard"));
+const AdminProductionQueue = lazy(() => import("./admin/AdminProductionQueue"));
 const StaffQueue = lazy(() => import("./Pages/StaffQueue"));
 
 // Lightweight suspense placeholder for deferred route transitions
@@ -159,6 +160,8 @@ function App() {
               <Route path="dashboard" element={<AdminDashboard />} />
               <Route path="pos" element={<AdminPOS />} />
               <Route path="front-office" element={<AdminFrontOfficeDashboard />} />
+              <Route path="production-queue" element={<AdminProductionQueue />} />
+              <Route path="operations" element={<StaffQueue />} />
               <Route path="workflow" element={<AdminWorkflowBoard />} />
               <Route path="queue" element={<StaffQueue />} />
               <Route path="staff" element={<AdminStaffManagement />} />

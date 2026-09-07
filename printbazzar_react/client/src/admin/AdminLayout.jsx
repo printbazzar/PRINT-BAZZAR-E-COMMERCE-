@@ -18,10 +18,12 @@ import {
   HiOutlineOfficeBuilding,
   HiOutlineShoppingCart,
   HiOutlineTrendingUp,
+  HiOutlinePrinter,
   HiMenu,
   HiX,
 } from 'react-icons/hi';
 import logo from '../assets/images/logo_white.png';
+import StaffNotificationBell from '../Components/StaffNotificationBell';
 
 export default function AdminLayout() {
   const { adminUser, isAuthenticated, loading, logout } = useAuth();
@@ -76,9 +78,10 @@ export default function AdminLayout() {
   if (isSuperAdmin) {
     navItems = [
       { label: 'Dashboard', path: '/admin/dashboard', icon: HiOutlineViewGrid },
+      { label: '🖨️ Production Queue', path: '/admin/production-queue', icon: HiOutlinePrinter },
+      { label: '🏭 Department Operations', path: '/admin/operations', icon: HiOutlineClipboardList },
       { label: 'Front Office POS', path: '/admin/pos', icon: HiOutlineShoppingCart },
       { label: 'Front Office Hub', path: '/admin/front-office', icon: HiOutlineTrendingUp },
-      { label: 'Factory Staff Queue', path: '/admin/queue', icon: HiOutlineClipboardList },
       { label: 'ERP Workflow (Kanban)', path: '/admin/workflow', icon: HiOutlineClipboardList },
       { label: 'Orders List', path: '/admin/orders', icon: HiOutlineShoppingBag },
       { label: 'Staff & Roles', path: '/admin/staff', icon: HiOutlineUserGroup },
@@ -102,7 +105,8 @@ export default function AdminLayout() {
   } else {
     const workstationTitle = deptWorkstationLabels[department] || 'Factory Workstation';
     navItems = [
-      { label: workstationTitle, path: '/admin/queue', icon: HiOutlineClipboardList },
+      { label: '🖨️ Production Queue', path: '/admin/production-queue', icon: HiOutlinePrinter },
+      { label: workstationTitle, path: '/admin/operations', icon: HiOutlineClipboardList },
       { label: 'Orders List', path: '/admin/orders', icon: HiOutlineShoppingBag },
     ];
     if (department === 'DESIGN') {
@@ -119,6 +123,7 @@ export default function AdminLayout() {
             <Link to="/admin/dashboard">
               <img src={logo} alt="Print Bazzar Admin" className="h-9" />
             </Link>
+            <StaffNotificationBell />
           </div>
           <div className="mt-2 px-2 py-1 bg-yellow-400 text-black text-[10px] font-extrabold uppercase rounded text-center tracking-wider">
             ADMIN CONTROL PANEL
@@ -190,12 +195,15 @@ export default function AdminLayout() {
         <Link to="/admin/dashboard">
           <img src={logo} alt="Print Bazzar Admin" className="h-7" />
         </Link>
-        <button
-          onClick={() => setMobileSidebarOpen(!mobileSidebarOpen)}
-          className="p-2 text-white hover:text-yellow-300"
-        >
-          {mobileSidebarOpen ? <HiX className="w-6 h-6" /> : <HiMenu className="w-6 h-6" />}
-        </button>
+        <div className="flex items-center gap-3">
+          <StaffNotificationBell />
+          <button
+            onClick={() => setMobileSidebarOpen(!mobileSidebarOpen)}
+            className="p-2 text-white hover:text-yellow-300"
+          >
+            {mobileSidebarOpen ? <HiX className="w-6 h-6" /> : <HiMenu className="w-6 h-6" />}
+          </button>
+        </div>
       </div>
 
       {/* Mobile Slideout Navigation */}

@@ -28,6 +28,9 @@ model User {
   auditLogs       AuditLog[]
   assignedDesignOrders DesignOrder[]
   authSessions    AuthSession[]
+  reportedIssues  JobIssue[]           @relation("ReportedByUser")
+  resolvedIssues  JobIssue[]           @relation("ResolvedByUser")
+  staffNotifications StaffNotification[]
 }
 
 model Role {
@@ -549,6 +552,8 @@ model Order {
   qualityChecks         QualityCheck[]
   shipments             Shipment[]
   invoices              Invoice[]
+  issues                JobIssue[]
+  staffNotifications    StaffNotification[]
 
   @@index([customerId])
   @@index([orderStatus])
@@ -881,13 +886,36 @@ model ProductionJob {
   startedAt                  DateTime?
   completedAt                DateTime?
   notes                      String?
+
+  // Phase 5 Department Operations & Staff Work Management
+  assignedDepartment         String?        @default("PRODUCTION")
+  assignedStaffId            String?
+  assignedByUserId           String?
+  assignedByName             String?
+  assignedAt                 DateTime?
+  reassignedByUserId         String?
+  reassignedByName           String?
+  reassignedAt               DateTime?
+  preHoldStatus              String?        // Preserves workflow stage during ON_HOLD / PAUSE
+  estimatedCompletionTime    DateTime?
+  actualCompletionTime       DateTime?
+  isPaused                   Boolean        @default(false)
+  pausedAt                   DateTime?
+  pauseReason                String?
+
   createdAt                  DateTime       @default(now())
   updatedAt                  DateTime       @updatedAt
 
   qualityChecks              QualityCheck[]
+  issues                     JobIssue[]
+  staffNotifications         StaffNotification[]
 
   @@index([orderId])
   @@index([orderItemId])
+  @@index([assignedStaffId])
+  @@index([assignedDepartment])
+  @@index([priority])
+  @@index([status])
 }
 
 model QualityCheck {
@@ -998,6 +1026,60 @@ model AuthSession {
   @@index([userId])
   @@index([customerId])
   @@index([familyId])
+}
+
+// ==========================================
+// PHASE 5: DEPARTMENT OPERATIONS, ISSUE / HOLD & STAFF NOTIFICATIONS
+// ==========================================
+
+model JobIssue {
+  id               String         @id @default(uuid())
+  orderId          String
+  order            Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productionJobId  String
+  productionJob    ProductionJob  @relation(fields: [productionJobId], references: [id], onDelete: Cascade)
+  department       String         // DESIGN, PRODUCTION, FINISHING_QC, PACKING, DELIVERY, etc.
+  issueCategory    String         // ARTWORK_PROBLEM, MATERIAL_UNAVAILABLE, MACHINE_ISSUE, COLOR_MISMATCH, CUSTOMER_CLARIFICATION, PAYMENT_ISSUE, QUANTITY_MISMATCH, DAMAGE, OTHER
+  description      String
+  reportedByUserId String?
+  reportedByUser   User?          @relation("ReportedByUser", fields: [reportedByUserId], references: [id])
+  reportedByName   String?
+  reportedAt       DateTime       @default(now())
+  resolutionStatus String         @default("OPEN") // OPEN, IN_PROGRESS, RESOLVED, DISMISSED
+  resolvedByUserId String?
+  resolvedByUser   User?          @relation("ResolvedByUser", fields: [resolvedByUserId], references: [id])
+  resolvedByName   String?
+  resolvedAt       DateTime?
+  resolutionNotes  String?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  @@index([orderId])
+  @@index([productionJobId])
+  @@index([department])
+  @@index([resolutionStatus])
+}
+
+model StaffNotification {
+  id              String         @id @default(uuid())
+  userId          String?
+  user            User?          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  department      String?        // Target department, e.g. "PRODUCTION", "DESIGN", "FRONT_OFFICE", or "ALL"
+  title           String
+  message         String
+  type            String         // NEW_JOB_ASSIGNED, JOB_REASSIGNED, URGENT_JOB, JOB_RETURNED, CUSTOMER_APPROVED, QC_APPROVED, READY_FOR_PRODUCTION, JOB_DELAYED, ISSUE_REPORTED, ISSUE_RESOLVED, JOB_COMPLETED
+  orderId         String?
+  order           Order?         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productionJobId String?
+  productionJob   ProductionJob? @relation(fields: [productionJobId], references: [id], onDelete: Cascade)
+  isRead          Boolean        @default(false)
+  readAt          DateTime?
+  metadataJson    String?
+  createdAt       DateTime       @default(now())
+
+  @@index([userId, isRead])
+  @@index([department])
+  @@index([createdAt(sort: Desc)])
 }
 
 

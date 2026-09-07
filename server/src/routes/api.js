@@ -169,6 +169,25 @@ import {
   createWalkInOrder,
   getFrontOfficeDashboard,
 } from '../controllers/posController.js';
+import {
+  getDepartmentQueue,
+  assignJob,
+  bulkAssignJobs,
+  updateJobPriority,
+  startProductionJob,
+  pauseProductionJob,
+  resumeProductionJob,
+  completePrintingJob,
+  reportJobIssue,
+  resolveJobIssue,
+  getDepartmentDashboard,
+  getManagerOverview,
+} from '../controllers/operationsController.js';
+import {
+  getStaffNotifications,
+  markNotificationRead,
+  markAllNotificationsRead,
+} from '../controllers/staffNotificationController.js';
 
 const router = express.Router();
 
@@ -371,6 +390,27 @@ router.post('/front-office/customers', authenticateAdmin, requirePermission('CUS
 router.post('/front-office/verify-manager-pin', authenticateAdmin, verifyManagerPin);
 router.post('/front-office/orders', authenticateAdmin, requirePermission('ORDER_UPDATE'), createWalkInOrder);
 router.get('/front-office/dashboard', authenticateAdmin, requirePermission('REPORT_VIEW'), getFrontOfficeDashboard);
+
+// ==========================================
+// PHASE 5: DEPARTMENT OPERATIONS & LIVE PRODUCTION QUEUE
+// ==========================================
+router.get('/admin/operations/queue', authenticateAdmin, requirePermission('ORDER_VIEW'), getDepartmentQueue);
+router.post('/admin/operations/jobs/:id/assign', authenticateAdmin, requirePermission('ORDER_UPDATE'), assignJob);
+router.post('/admin/operations/jobs/bulk-assign', authenticateAdmin, requirePermission('ORDER_UPDATE'), bulkAssignJobs);
+router.patch('/admin/operations/jobs/:id/priority', authenticateAdmin, requirePermission('ORDER_UPDATE'), updateJobPriority);
+router.post('/admin/operations/jobs/:id/start', authenticateAdmin, requirePermission('ORDER_UPDATE'), startProductionJob);
+router.post('/admin/operations/jobs/:id/pause', authenticateAdmin, requirePermission('ORDER_UPDATE'), pauseProductionJob);
+router.post('/admin/operations/jobs/:id/resume', authenticateAdmin, requirePermission('ORDER_UPDATE'), resumeProductionJob);
+router.post('/admin/operations/jobs/:id/complete-printing', authenticateAdmin, requirePermission('ORDER_UPDATE'), completePrintingJob);
+router.post('/admin/operations/jobs/:id/report-issue', authenticateAdmin, requirePermission('ORDER_UPDATE'), reportJobIssue);
+router.post('/admin/operations/issues/:id/resolve', authenticateAdmin, requirePermission('ORDER_UPDATE'), resolveJobIssue);
+router.get('/admin/operations/department-dashboard', authenticateAdmin, requirePermission('REPORT_VIEW'), getDepartmentDashboard);
+router.get('/admin/operations/manager-overview', authenticateAdmin, requirePermission('REPORT_VIEW'), getManagerOverview);
+
+// Staff Notifications
+router.get('/admin/staff-notifications', authenticateAdmin, getStaffNotifications);
+router.patch('/admin/staff-notifications/:id/read', authenticateAdmin, markNotificationRead);
+router.post('/admin/staff-notifications/mark-all-read', authenticateAdmin, markAllNotificationsRead);
 
 // Media & Video Upload (Admin - Supabase Storage & Local Fallback)
 router.post('/admin/upload', authenticateAdmin, (req, res) => {
