@@ -53,6 +53,8 @@ const AdminBusinessSettings = lazy(() => import("./admin/AdminBusinessSettings")
 const AdminAuditLogs = lazy(() => import("./admin/AdminAuditLogs"));
 const AdminProductConfigurator = lazy(() => import("./admin/AdminProductConfigurator"));
 const AdminOptionMasterManager = lazy(() => import("./admin/AdminOptionMasterManager"));
+const AdminPOS = lazy(() => import("./admin/AdminPOS"));
+const AdminFrontOfficeDashboard = lazy(() => import("./admin/AdminFrontOfficeDashboard"));
 const StaffQueue = lazy(() => import("./Pages/StaffQueue"));
 
 // Lightweight suspense placeholder for deferred route transitions
@@ -155,6 +157,8 @@ function App() {
             <Route path="/admin" element={<AdminLayout />}>
               <Route index element={<Navigate to="/admin/dashboard" replace />} />
               <Route path="dashboard" element={<AdminDashboard />} />
+              <Route path="pos" element={<AdminPOS />} />
+              <Route path="front-office" element={<AdminFrontOfficeDashboard />} />
               <Route path="workflow" element={<AdminWorkflowBoard />} />
               <Route path="queue" element={<StaffQueue />} />
               <Route path="staff" element={<AdminStaffManagement />} />
@@ -176,6 +180,8 @@ function App() {
               <Route path="audit-logs" element={<AdminAuditLogs />} />
             </Route>
           <Route path="/staff/queue" element={<StaffQueue />} />
+          <Route path="/front-office" element={<Navigate to="/admin/front-office" replace />} />
+          <Route path="/front-office/orders/new" element={<Navigate to="/admin/pos" replace />} />
 
           {/* ========================================== */}
           {/* CUSTOMER & CORPORATE PORTAL ROUTES */}

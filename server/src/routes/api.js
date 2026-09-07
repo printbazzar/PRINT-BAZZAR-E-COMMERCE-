@@ -162,6 +162,13 @@ import {
   updateAdminBusinessInfo,
   resetAdminBusinessInfo,
 } from '../controllers/businessInfoController.js';
+import {
+  searchCustomers,
+  createQuickCustomer,
+  verifyManagerPin,
+  createWalkInOrder,
+  getFrontOfficeDashboard,
+} from '../controllers/posController.js';
 
 const router = express.Router();
 
@@ -348,6 +355,22 @@ router.post('/admin/logistics/orders/:orderId/mark-delivered', authenticateAdmin
 
 // Tax Invoice
 router.post('/admin/orders/:orderId/generate-tax-invoice', authenticateAdmin, requirePermission('ORDER_UPDATE'), generateTaxInvoice);
+
+// ==========================================
+// PHASE 4: FRONT OFFICE & OMNICHANNEL POS
+// ==========================================
+router.get('/admin/pos/customers/search', authenticateAdmin, requirePermission('CUSTOMER_VIEW'), searchCustomers);
+router.post('/admin/pos/customers', authenticateAdmin, requirePermission('CUSTOMER_VIEW'), createQuickCustomer);
+router.post('/admin/pos/verify-manager-pin', authenticateAdmin, verifyManagerPin);
+router.post('/admin/pos/orders', authenticateAdmin, requirePermission('ORDER_UPDATE'), createWalkInOrder);
+router.get('/admin/pos/dashboard', authenticateAdmin, requirePermission('REPORT_VIEW'), getFrontOfficeDashboard);
+
+// Route aliases for /front-office prefix
+router.get('/front-office/customers/search', authenticateAdmin, requirePermission('CUSTOMER_VIEW'), searchCustomers);
+router.post('/front-office/customers', authenticateAdmin, requirePermission('CUSTOMER_VIEW'), createQuickCustomer);
+router.post('/front-office/verify-manager-pin', authenticateAdmin, verifyManagerPin);
+router.post('/front-office/orders', authenticateAdmin, requirePermission('ORDER_UPDATE'), createWalkInOrder);
+router.get('/front-office/dashboard', authenticateAdmin, requirePermission('REPORT_VIEW'), getFrontOfficeDashboard);
 
 // Media & Video Upload (Admin - Supabase Storage & Local Fallback)
 router.post('/admin/upload', authenticateAdmin, (req, res) => {

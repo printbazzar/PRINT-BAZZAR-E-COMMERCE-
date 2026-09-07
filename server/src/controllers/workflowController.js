@@ -217,7 +217,7 @@ export const handoverOrder = async (req, res) => {
     // 1. Role / Department Authorization Check
     const authCheck = validateDepartmentAuthorization(req.user, effectiveDept, 'TRANSITION');
     if (!authCheck.authorized) {
-      return res.status(403).json({ success: false, message: authCheck.error });
+      return res.status(403).json({ success: false, code: 'DEPARTMENT_UNAUTHORIZED', message: authCheck.error });
     }
 
     // 2. Strict State-Machine Transition Validation
@@ -580,7 +580,7 @@ export const submitPreProductionQC = async (req, res) => {
     // Role check: Only Prepress (DESIGN), Production, or Super Admin can pass Pre-Production QC
     const authCheck = validateDepartmentAuthorization(req.user, 'PRODUCTION', 'PRE_PRODUCTION_QC');
     if (!authCheck.authorized) {
-      return res.status(403).json({ success: false, message: authCheck.error });
+      return res.status(403).json({ success: false, code: 'DEPARTMENT_UNAUTHORIZED', message: authCheck.error });
     }
 
     const inspector = inspectorName || req.user?.name || 'Prepress Lead';
@@ -925,7 +925,7 @@ export const reviewArtwork = async (req, res) => {
     // Role check: Only Prepress (DESIGN) or Super Admin can perform artwork review
     const authCheck = validateDepartmentAuthorization(req.user, 'DESIGN', 'ARTWORK_REVIEW');
     if (!authCheck.authorized) {
-      return res.status(403).json({ success: false, message: authCheck.error });
+      return res.status(403).json({ success: false, code: 'DEPARTMENT_UNAUTHORIZED', message: authCheck.error });
     }
 
     const reviewer = req.user?.name || 'Prepress Specialist';

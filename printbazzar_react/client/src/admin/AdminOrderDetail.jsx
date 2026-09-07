@@ -20,6 +20,7 @@ import { api } from '../services/api';
 import ShippingLabelModal from '../Components/ShippingLabelModal';
 import JobCardModal from '../Components/JobCardModal';
 import PreProductionQCModal from '../Components/PreProductionQCModal';
+import OrderSourceBadge from '../Components/OrderSourceBadge';
 import { useBusinessInfo } from '../context/BusinessInfoContext';
 
 const COURIER_PARTNERS = [
@@ -346,17 +347,28 @@ export default function AdminOrderDetail() {
             <HiArrowLeft className="w-5 h-5" />
           </Link>
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-2xl font-black text-gray-900 font-mono">{order.orderNumber}</h1>
+              <OrderSourceBadge source={order.orderSource} size="sm" />
               <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-yellow-100 text-yellow-800">
                 {order.orderStatus?.replace(/_/g, ' ')}
               </span>
               <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-blue-100 text-blue-800">
                 {order.currentDepartment} DEPT
               </span>
+              {order.branch && (
+                <span className="text-xs font-semibold px-2 py-0.5 rounded bg-gray-100 text-gray-700 border">
+                  📍 {order.branch}
+                </span>
+              )}
             </div>
             <p className="text-xs text-gray-500 mt-0.5">
               Customer: <span className="font-semibold text-gray-800">{order.customerName}</span> ({order.customerMobile}) | Placed on {new Date(order.createdAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}
+              {order.createdStaffName && (
+                <span className="ml-2 pl-2 border-l border-gray-300 font-medium text-indigo-700">
+                  Staff: {order.createdStaffName}
+                </span>
+              )}
             </p>
           </div>
         </div>

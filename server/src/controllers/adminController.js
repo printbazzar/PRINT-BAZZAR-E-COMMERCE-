@@ -50,7 +50,7 @@ export const getDashboardKPIs = async (req, res) => {
       prisma.order.count({ where: { orderStatus: { in: ['ORDER_RECEIVED', 'CONFIRMED', 'Processing', 'PROCESSING', 'PAYMENT_PENDING'] } } }),
       prisma.order.count({ where: { orderStatus: { in: ['PRODUCTION_QUEUE', 'PRINTING', 'FINISHING', 'QC'] } } }),
       prisma.order.count({ where: { orderStatus: 'DELIVERED' } }),
-      prisma.order.findMany({ select: { grandTotal: true, createdAt: true, paymentStatus: true } }),
+      prisma.order.findMany({ select: { grandTotal: true, createdAt: true, paymentStatus: true, orderSource: true } }),
       prisma.product.count(),
       prisma.product.count({ where: { status: 'ACTIVE' } }),
       prisma.order.findMany({
@@ -70,6 +70,24 @@ export const getDashboardKPIs = async (req, res) => {
       .filter((o) => new Date(o.createdAt) >= today)
       .reduce((sum, o) => sum + (o.grandTotal || 0), 0);
     const pendingPaymentsCount = allOrders.filter((o) => o.paymentStatus === 'PENDING').length;
+
+    // Phase 4 Omnichannel Order Source Analytics (Website, Walk-in, WhatsApp, Instagram, Phone, B2B, Staff Assisted)
+    const sourceKeys = ['WEBSITE', 'WALK_IN', 'WHATSAPP', 'INSTAGRAM', 'PHONE', 'B2B', 'STAFF_ASSISTED'];
+    const orderSourceAnalytics = sourceKeys.map((source) => {
+      const sourceOrders = allOrders.filter((o) => (o.orderSource || 'WEBSITE') === source);
+      const todaySourceOrders = sourceOrders.filter((o) => new Date(o.createdAt) >= today);
+      const revenue = sourceOrders.reduce((sum, o) => sum + (o.grandTotal || 0), 0);
+      const todayRevenue = todaySourceOrders.reduce((sum, o) => sum + (o.grandTotal || 0), 0);
+      const aov = sourceOrders.length > 0 ? Math.round(revenue / sourceOrders.length) : 0;
+      return {
+        source,
+        totalOrders: sourceOrders.length,
+        todayOrders: todaySourceOrders.length,
+        totalRevenue: revenue,
+        todayRevenue,
+        averageOrderValue: aov,
+      };
+    });
 
     // Build 7-day trend
     const last7Days = [];
@@ -109,6 +127,7 @@ export const getDashboardKPIs = async (req, res) => {
           totalProducts,
           activeProducts,
         },
+        orderSourceAnalytics,
         chartData: last7Days,
         recentOrders,
         recentAuditLogs,
@@ -880,7 +899,7 @@ export const deleteBanner = async (req, res) => {
 // 5. Admin Orders Management
 export const getAdminOrders = async (req, res) => {
   try {
-    const { search, status, paymentStatus, department, priority, page = 1, limit = 50 } = req.query;
+    const { search, status, paymentStatus, department, priority, orderSource, branch, page = 1, limit = 50 } = req.query;
     const where = {};
 
     if (search && search.trim()) {
@@ -904,6 +923,8 @@ export const getAdminOrders = async (req, res) => {
     }
     if (paymentStatus && paymentStatus !== 'ALL') where.paymentStatus = paymentStatus;
     if (department && department !== 'ALL') where.currentDepartment = department;
+    if (orderSource && orderSource !== 'ALL') where.orderSource = orderSource;
+    if (branch && branch !== 'ALL') where.branch = branch;
     if (priority && priority !== 'ALL') {
       where.productionJobs = { some: { priority } };
     }
@@ -916,6 +937,16 @@ export const getAdminOrders = async (req, res) => {
         where,
         include: {
           items: true,
+          invoices: {
+            select: {
+              invoiceNumber: true,
+              balanceDue: true,
+              amountPaid: true,
+              grandTotal: true,
+              paymentStatus: true,
+            },
+            take: 1,
+          },
           statusHistory: { orderBy: { createdAt: 'desc' }, take: 1 },
         },
         orderBy: { createdAt: 'desc' },

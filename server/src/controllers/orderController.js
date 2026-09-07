@@ -24,6 +24,12 @@ export const createOrder = async (req, res) => {
       deliveryMethod = 'COURIER', // COURIER, STORE_PICKUP
       paymentMethod = 'UPI',
       items, // array of items: [{ productId, quantity, selectedOptions, designRequired, artworkFileUrl }]
+      orderSource = 'WEBSITE', // WEBSITE, WALK_IN, WHATSAPP, INSTAGRAM, PHONE, B2B, STAFF_ASSISTED
+      branch = 'TRICHY_MAIN',
+      discountAmount = 0,
+      discountReason = null,
+      createdStaffId = null,
+      createdStaffName = null,
     } = req.body;
 
     if (!customerName || !customerMobile || !items || !items.length) {
@@ -424,7 +430,8 @@ export const createOrder = async (req, res) => {
           billingAddress: billingAddress ? (typeof billingAddress === 'string' ? billingAddress : JSON.stringify(billingAddress)) : null,
           gstNumber: gstNumber || null,
           subtotal: calculatedSubtotal,
-          discountAmount: 0,
+          discountAmount: typeof discountAmount === 'number' ? discountAmount : 0,
+          discountReason: discountReason || null,
           shippingCharge,
           cgstAmount,
           sgstAmount,
@@ -443,6 +450,12 @@ export const createOrder = async (req, res) => {
           currentDepartment: initialDepartment,
           assignedStaffName: initialStaffRole,
           proofStatus: hasDesignRequest ? 'PENDING' : 'APPROVED',
+
+          // Phase 4 Omnichannel Order Source & Staff Accountability
+          orderSource: orderSource || 'WEBSITE',
+          branch: branch || 'TRICHY_MAIN',
+          createdStaffId: createdStaffId || req.user?.id || null,
+          createdStaffName: createdStaffName || req.user?.name || null,
           items: {
             create: validatedItems,
           },

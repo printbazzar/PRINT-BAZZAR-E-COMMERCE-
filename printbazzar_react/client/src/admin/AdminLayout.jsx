@@ -16,6 +16,8 @@ import {
   HiOutlineSparkles,
   HiOutlineCollection,
   HiOutlineOfficeBuilding,
+  HiOutlineShoppingCart,
+  HiOutlineTrendingUp,
   HiMenu,
   HiX,
 } from 'react-icons/hi';
@@ -50,13 +52,18 @@ export default function AdminLayout() {
   React.useEffect(() => {
     if (!loading && isAuthenticated && !isSuperAdmin) {
       if (location.pathname === '/admin' || location.pathname === '/admin/dashboard') {
-        navigate('/admin/queue', { replace: true });
+        if (department === 'FRONT_OFFICE' || role === 'FRONT_OFFICE') {
+          navigate('/admin/pos', { replace: true });
+        } else {
+          navigate('/admin/queue', { replace: true });
+        }
       }
     }
-  }, [loading, isAuthenticated, isSuperAdmin, location.pathname, navigate]);
+  }, [loading, isAuthenticated, isSuperAdmin, department, role, location.pathname, navigate]);
 
   // Department workstation labels
   const deptWorkstationLabels = {
+    FRONT_OFFICE: '🛒 Front Office Desk',
     PRODUCTION: '🖨️ Press Room Station',
     FINISHING_QC: '✂️ Finishing & QC Desk',
     PACKING: '📦 Packaging Desk',
@@ -69,6 +76,8 @@ export default function AdminLayout() {
   if (isSuperAdmin) {
     navItems = [
       { label: 'Dashboard', path: '/admin/dashboard', icon: HiOutlineViewGrid },
+      { label: 'Front Office POS', path: '/admin/pos', icon: HiOutlineShoppingCart },
+      { label: 'Front Office Hub', path: '/admin/front-office', icon: HiOutlineTrendingUp },
       { label: 'Factory Staff Queue', path: '/admin/queue', icon: HiOutlineClipboardList },
       { label: 'ERP Workflow (Kanban)', path: '/admin/workflow', icon: HiOutlineClipboardList },
       { label: 'Orders List', path: '/admin/orders', icon: HiOutlineShoppingBag },
@@ -83,6 +92,12 @@ export default function AdminLayout() {
       { label: 'Business & Contact Info', path: '/admin/business-settings', icon: HiOutlineOfficeBuilding },
       { label: 'Footer Management', path: '/admin/footer-settings', icon: HiOutlineCollection },
       { label: 'Audit Logs', path: '/admin/audit-logs', icon: HiOutlineDocumentReport },
+    ];
+  } else if (department === 'FRONT_OFFICE' || role === 'FRONT_OFFICE') {
+    navItems = [
+      { label: '🛒 Front Office POS', path: '/admin/pos', icon: HiOutlineShoppingCart },
+      { label: '📊 Front Office Hub', path: '/admin/front-office', icon: HiOutlineTrendingUp },
+      { label: 'Orders List', path: '/admin/orders', icon: HiOutlineShoppingBag },
     ];
   } else {
     const workstationTitle = deptWorkstationLabels[department] || 'Factory Workstation';

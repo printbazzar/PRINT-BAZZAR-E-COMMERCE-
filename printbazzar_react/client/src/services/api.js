@@ -621,5 +621,15 @@ export const api = {
   saveCompatibilityRule: (id, data) => request(`/admin/products/${id}/compatibility-rules`, { method: 'POST', body: data }),
   deleteCompatibilityRule: (ruleId) => request(`/admin/products/compatibility-rules/${ruleId}`, { method: 'DELETE' }),
   rollbackPriceVersion: (id, versionId) => request(`/admin/products/${id}/price-versions/rollback`, { method: 'POST', body: { versionId } }),
+
+  // ==========================================
+  // PHASE 4: FRONT OFFICE & OMNICHANNEL POS
+  // ==========================================
+  searchPosCustomers: (query) => request(`/admin/pos/customers/search?query=${encodeURIComponent(query)}`),
+  createPosCustomer: (data) => request('/admin/pos/customers', { method: 'POST', body: data }),
+  verifyManagerPin: (data) => request('/admin/pos/verify-manager-pin', { method: 'POST', body: data }),
+  createWalkInOrder: (data) => request('/admin/pos/orders', { method: 'POST', body: data }),
+  getFrontOfficeDashboard: (date) => request(`/admin/pos/dashboard${date ? `?date=${encodeURIComponent(date)}` : ''}`),
 };
+
 

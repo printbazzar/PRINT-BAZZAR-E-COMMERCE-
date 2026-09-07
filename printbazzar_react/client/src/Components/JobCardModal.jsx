@@ -97,7 +97,7 @@ export default function JobCardModal({ show, onClose, order, job = null }) {
           </div>
 
           {/* 2. Top Identifiers Grid */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-gray-100 p-3 rounded-lg border border-gray-300 mb-3 font-mono text-xs">
+          <div className="grid grid-cols-2 sm:grid-cols-6 gap-2 bg-gray-100 p-3 rounded-lg border border-gray-300 mb-3 font-mono text-xs">
             <div>
               <span className="text-[10px] font-sans text-gray-500 uppercase block font-bold">Job Number</span>
               <span className="font-black text-sm text-blue-700">{jobNumber}</span>
@@ -107,7 +107,15 @@ export default function JobCardModal({ show, onClose, order, job = null }) {
               <span className="font-black text-sm text-gray-900">{order.orderNumber}</span>
             </div>
             <div>
-              <span className="text-[10px] font-sans text-gray-500 uppercase block font-bold">Current Department</span>
+              <span className="text-[10px] font-sans text-gray-500 uppercase block font-bold">Channel / Source</span>
+              <span className="font-black text-xs text-indigo-700 uppercase">{order.orderSource || 'WEBSITE'}</span>
+            </div>
+            <div>
+              <span className="text-[10px] font-sans text-gray-500 uppercase block font-bold">Branch</span>
+              <span className="font-bold text-xs text-gray-800">{order.branch || 'TRICHY_MAIN'}</span>
+            </div>
+            <div>
+              <span className="text-[10px] font-sans text-gray-500 uppercase block font-bold">Department</span>
               <span className="font-black text-xs text-purple-700">{order.currentDepartment || 'PRODUCTION'}</span>
             </div>
             <div>
@@ -124,6 +132,9 @@ export default function JobCardModal({ show, onClose, order, job = null }) {
               <p className="font-black text-gray-900 text-sm">{order.customerName}</p>
               <p className="font-mono text-gray-700">Mobile: <span className="font-bold">{order.customerMobile}</span></p>
               {order.customerEmail && <p className="text-gray-500 text-[11px] truncate">Email: {order.customerEmail}</p>}
+              {order.createdStaffName && (
+                <p className="text-[11px] text-indigo-700 font-semibold">Booked by Staff: {order.createdStaffName}</p>
+              )}
             </div>
 
             {/* Financial Details */}

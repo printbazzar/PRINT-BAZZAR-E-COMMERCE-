@@ -4,6 +4,7 @@ import { TextInput, Select, Button, Spinner } from 'flowbite-react';
 import { HiSearch, HiOutlineEye, HiOutlinePrinter } from 'react-icons/hi';
 import { api } from '../services/api';
 import PreProductionQCModal from '../Components/PreProductionQCModal';
+import OrderSourceBadge from '../Components/OrderSourceBadge';
 
 export default function AdminOrders() {
   const [orders, setOrders] = useState([]);
@@ -12,6 +13,7 @@ export default function AdminOrders() {
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [paymentFilter, setPaymentFilter] = useState('ALL');
   const [departmentFilter, setDepartmentFilter] = useState('ALL');
+  const [orderSourceFilter, setOrderSourceFilter] = useState('ALL');
   const [totalOrders, setTotalOrders] = useState(0);
   const [page, setPage] = useState(1);
   const [selectedQcOrder, setSelectedQcOrder] = useState(null);
@@ -19,7 +21,7 @@ export default function AdminOrders() {
 
   useEffect(() => {
     fetchOrders();
-  }, [search, statusFilter, paymentFilter, departmentFilter, page]);
+  }, [search, statusFilter, paymentFilter, departmentFilter, orderSourceFilter, page]);
 
   const fetchOrders = async () => {
     setLoading(true);
@@ -29,6 +31,7 @@ export default function AdminOrders() {
         status: statusFilter,
         paymentStatus: paymentFilter,
         department: departmentFilter,
+        orderSource: orderSourceFilter,
         page,
         limit: 25,
       });
@@ -95,7 +98,7 @@ export default function AdminOrders() {
       </div>
 
       {/* Search & Status Filters */}
-      <div className="bg-white p-4 rounded-xl border shadow-xs grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="bg-white p-4 rounded-xl border shadow-xs grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
         <TextInput
           type="text"
           placeholder="Search by Order ID, Name, Mobile..."
@@ -107,6 +110,24 @@ export default function AdminOrders() {
           icon={HiSearch}
           size="sm"
         />
+
+        <Select
+          value={orderSourceFilter}
+          onChange={(e) => {
+            setOrderSourceFilter(e.target.value);
+            setPage(1);
+          }}
+          size="sm"
+        >
+          <option value="ALL">All Sources / Channels</option>
+          <option value="WEBSITE">🌐 Website Direct</option>
+          <option value="WALK_IN">🏪 Counter Walk-In</option>
+          <option value="WHATSAPP">💬 WhatsApp Chat</option>
+          <option value="INSTAGRAM">📸 Instagram DM</option>
+          <option value="PHONE">📞 Phone Order</option>
+          <option value="B2B">🏢 Corporate B2B</option>
+          <option value="STAFF_ASSISTED">👨‍💼 Staff Assisted</option>
+        </Select>
 
         <Select
           value={departmentFilter}
@@ -200,10 +221,13 @@ export default function AdminOrders() {
               <tbody className="divide-y divide-gray-100">
                 {orders.map((ord) => (
                   <tr key={ord.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="p-3 font-mono font-bold text-gray-900">
-                      <Link to={`/admin/orders/${ord.id}`} className="hover:text-yellow-600">
+                    <td className="p-3">
+                      <Link to={`/admin/orders/${ord.id}`} className="font-mono font-bold text-gray-900 hover:text-yellow-600 block">
                         {ord.orderNumber}
                       </Link>
+                      <div className="mt-1">
+                        <OrderSourceBadge source={ord.orderSource} size="xs" />
+                      </div>
                     </td>
 
                     <td className="p-3 text-gray-500 whitespace-nowrap">

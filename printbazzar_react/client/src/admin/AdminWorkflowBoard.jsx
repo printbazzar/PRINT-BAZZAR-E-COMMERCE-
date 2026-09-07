@@ -15,6 +15,7 @@ import {
 import { api } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import PreProductionQCModal from '../Components/PreProductionQCModal';
+import OrderSourceBadge from '../Components/OrderSourceBadge';
 
 const DEPARTMENTS = [
   {
@@ -325,14 +326,17 @@ export default function AdminWorkflowBoard() {
                         className="bg-white rounded-xl border border-gray-200 p-3 shadow-2xs hover:shadow-md transition-all space-y-2 text-xs"
                       >
                         {/* Order Number & Status */}
-                        <div className="flex justify-between items-start">
-                          <Link
-                            to={`/admin/orders/${ord.id}`}
-                            className="font-black text-gray-900 hover:text-yellow-600 font-mono text-xs block"
-                          >
-                            {ord.orderNumber}
-                          </Link>
-                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-gray-100 text-gray-700">
+                        <div className="flex justify-between items-start gap-1">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <Link
+                              to={`/admin/orders/${ord.id}`}
+                              className="font-black text-gray-900 hover:text-yellow-600 font-mono text-xs block"
+                            >
+                              {ord.orderNumber}
+                            </Link>
+                            <OrderSourceBadge source={ord.orderSource} size="xs" />
+                          </div>
+                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-gray-100 text-gray-700 flex-shrink-0">
                             {ord.orderStatus?.replace(/_/g, ' ')}
                           </span>
                         </div>

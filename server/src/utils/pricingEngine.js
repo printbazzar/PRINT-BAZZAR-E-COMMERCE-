@@ -278,7 +278,7 @@ export function calculatePricing({
   // Used if no combination matrix was matched or defined
   // =========================================================================
   let matchedSlab = null;
-  if (!basePrice && (pricingMethod !== 'MATRIX' && pricingMethod !== 'COMBINATION' || matrices.length === 0)) {
+  if (!basePrice && isAvailable) {
     const hasSlabs = product.priceSlabs && product.priceSlabs.length > 0;
 
     if (hasSlabs) {

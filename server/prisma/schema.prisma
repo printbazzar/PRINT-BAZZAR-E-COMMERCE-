@@ -423,6 +423,8 @@ model Customer {
   carts                Cart[]
   savedAddresses       CustomerAddress[]
   authSessions         AuthSession[]
+
+  @@index([mobile])
 }
 
 model CustomerAddress {
@@ -526,6 +528,15 @@ model Order {
   productionDays        Int?                 @default(3)
   transitDays           Int?                 @default(2)
 
+  // Phase 4 Omnichannel Order Source & Staff Accountability
+  orderSource           String               @default("WEBSITE") // WEBSITE, WALK_IN, WHATSAPP, INSTAGRAM, PHONE, B2B, STAFF_ASSISTED
+  branch                String?              @default("TRICHY_MAIN") // Future multi-branch readiness
+  discountReason        String?
+  createdStaffId        String?
+  createdStaffName      String?
+  managerApprovalId     String?
+  managerApprovalName   String?
+
   createdAt             DateTime             @default(now())
   updatedAt             DateTime             @updatedAt
 
@@ -543,6 +554,7 @@ model Order {
   @@index([orderStatus])
   @@index([createdAt(sort: Desc)])
   @@index([paymentStatus])
+  @@index([orderSource])
 }
 
 model OrderItem {

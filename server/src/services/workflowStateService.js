@@ -262,5 +262,15 @@ export function validateDepartmentAuthorization(user, targetDepartment, action =
     };
   }
 
+  // Front Office staff cannot perform factory floor transitions
+  if (userDept === 'FRONT_OFFICE') {
+    if (['PRODUCTION', 'FINISHING_QC', 'PACKING', 'DELIVERY'].includes(targetDepartment) || action === 'PRE_PRODUCTION_QC') {
+      return {
+        authorized: false,
+        error: `FORBIDDEN: Front Office staff cannot execute actions in the ${targetDepartment} department or approve QC gates.`,
+      };
+    }
+  }
+
   return { authorized: true };
 }
