@@ -1,28 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { Link, NavLink } from 'react-router-dom';
-import {
-  HiOutlineCreditCard,
-  HiOutlineTag,
-  HiOutlineSpeakerphone,
-  HiOutlineMail,
-  HiOutlineGift,
-  HiOutlineCube,
-  HiOutlineDocumentText,
-  HiOutlineBadgeCheck,
-} from 'react-icons/hi';
+import { HiOutlineTag } from 'react-icons/hi';
 import { api } from '../services/api';
-
-const CATEGORY_SHORTCUTS = [
-  { name: 'Visiting Cards', slug: 'business-cards', icon: HiOutlineCreditCard, isHot: true },
-  { name: 'Stickers & Labels', slug: 'stickers-and-labels', icon: HiOutlineTag, isHot: true },
-  { name: 'Flyers & Marketing', slug: 'marketing-and-promotionals-items', icon: HiOutlineSpeakerphone },
-  { name: 'Business Stationery', slug: 'business-essentials', icon: HiOutlineDocumentText },
-  { name: 'Invitations', slug: 'invitations', icon: HiOutlineMail },
-  { name: 'Apparels & Caps', slug: 'apparels', icon: HiOutlineCube },
-  { name: 'Packaging & Bags', slug: 'packaging-items', icon: HiOutlineCube },
-  { name: 'Corporate Gifts', slug: 'gifts', icon: HiOutlineGift },
-  { name: 'Certificates & Awards', slug: 'certificates-and-awards', icon: HiOutlineBadgeCheck },
-];
+// Phase 2A: consolidated onto the single shared category source of truth
+// (previously this file kept its own separate hardcoded CATEGORY_SHORTCUTS
+// array, duplicating the one in CategoryBubbleRow.jsx).
+import { categories as CATEGORY_SHORTCUTS } from '../assets/data/categories.js';
 
 export default function CategoryNavBar() {
   const [categories, setCategories] = useState(CATEGORY_SHORTCUTS);

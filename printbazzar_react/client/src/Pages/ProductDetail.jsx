@@ -17,6 +17,8 @@ import {
   HiTrash,
   HiRefresh,
   HiOutlineClipboardList,
+  HiChevronDown,
+  HiChevronUp,
 } from 'react-icons/hi';
 import { FaWhatsapp } from 'react-icons/fa';
 import { api } from '../services/api';
@@ -34,6 +36,55 @@ import GuideDesign from '../Components/GuideDesign';
 import Feedback from '../Components/Feedback';
 import PaperGsmSelector from '../Components/PaperGsmSelector';
 import DynamicQuantityTierPricing from '../Components/DynamicQuantityTierPricing';
+
+// ---------------------------------------------------------------------------------------------
+// Customer-facing configuration UX helpers (presentation-only).
+//
+// These never change selectedOptions keys, pricing engine inputs/outputs, or the underlying
+// OptionMaster / ProductOptionMapping data returned by the API — they only decide how the SAME
+// existing option mappings are grouped and labeled for the customer. Admin control over which
+// options are mapped/enabled/customer-visible per product is completely untouched; this only
+// changes how the mapped, visible options are presented on the page.
+// ---------------------------------------------------------------------------------------------
+
+// Renames a couple of internal/technical option names into plain customer language. Anything not
+// listed here is left exactly as the admin configured it (its customLabel/master name is already
+// customer-facing).
+function getFriendlyOptionLabel(rawName = '') {
+  const n = String(rawName).toLowerCase().trim();
+  if (n === 'media') return 'Paper Type';
+  if (n === 'material') return 'Paper Quality';
+  return rawName;
+}
+
+// Buckets any option mapping (core or add-on) into one of a small set of guided-flow sections,
+// purely from its existing name/code/isAddon flag. There is no per-product hardcoding here, so
+// the same logic groups Business Card's Media/Material/Printing Side/Lamination/Corner Cut just
+// as well as a Sticker's Shape/Material/Finish or a Box's Box Type/Material/Printing — whatever a
+// product actually has mapped decides which groups appear.
+function classifyConfigGroup(optName = '', optCode = '', isAddon = false) {
+  const n = String(optName).toLowerCase();
+  const c = String(optCode || '').toLowerCase();
+  const has = (kw) => n.includes(kw) || c.includes(kw);
+
+  if (isAddon || has('finish') || has('lamina') || has('corner') || has('coat') || has('uv') || has('foil') || has('gloss') || has('matte') || has('emboss') || has('spot')) {
+    return 'finish';
+  }
+  if (has('print') || has('side') || has('colour') || has('color')) {
+    return 'printing';
+  }
+  if (has('media') || has('material') || has('paper') || has('gsm') || has('stock') || has('board') || has('texture') || has('quality') || has('size') || has('thickness')) {
+    return 'paper';
+  }
+  return 'specs';
+}
+
+const CONFIG_GROUP_META = {
+  specs: { label: 'Specifications', icon: HiOutlineClipboardList },
+  paper: { label: 'Paper', icon: HiOutlineColorSwatch },
+  printing: { label: 'Printing', icon: HiOutlineDocumentText },
+  finish: { label: 'Finish', icon: HiOutlineSparkles },
+};
 
 export default function ProductDetail() {
   const { slug } = useParams();
@@ -81,6 +132,7 @@ export default function ProductDetail() {
   const [largePreviewOpen, setLargePreviewOpen] = useState(false);
   const [artworkVersion, setArtworkVersion] = useState(1);
   const [activeInfoTab, setActiveInfoTab] = useState(null);
+  const [openConfigGroup, setOpenConfigGroup] = useState(null); // guided configuration flow: which group is expanded
 
   // Pricing state
   const [pricing, setPricing] = useState({
@@ -245,6 +297,52 @@ export default function ProductDetail() {
       })
       .map((m) => m.customLabel || m.master?.name);
   }, [product, selectedOptions, compatibilityResult]);
+
+  // Group all visible, applicable options (core + add-on) into a small set of guided-flow
+  // sections (Specifications / Paper / Printing / Finish) instead of one long flat list. Purely
+  // derived from the existing optionMappings — no separate configuration system, no change to
+  // what's mapped/enabled/customer-visible for the product.
+  const configGroups = React.useMemo(() => {
+    const empty = { hasDynamic: false, hasGsmInCore: true, groups: { specs: [], paper: [], printing: [], finish: [] }, groupOrder: [] };
+    if (!product) return empty;
+
+    const hasDynamic = !!(product.optionMappings && product.optionMappings.length > 0);
+    const coreList = hasDynamic
+      ? [...product.optionMappings]
+          .filter((m) => !m.isAddon && m.isEnabled !== false)
+          .sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0))
+      : (product.options || []).filter((o) => !o.isAddon);
+    const addonList = hasDynamic
+      ? [...product.optionMappings]
+          .filter((m) => m.isAddon && m.isEnabled !== false)
+          .sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0))
+      : (product.options || []).filter((o) => o.isAddon);
+
+    const hasGsmInCore = coreList.some((item) => {
+      const n = (hasDynamic ? (item.customLabel || item.master?.name) : item.optionName || '').toLowerCase();
+      const c = (hasDynamic ? (item.master?.code) : '').toLowerCase();
+      return (
+        n.includes('gsm') || n.includes('paper stock') || n.includes('paper quality') || n.includes('paper material') ||
+        c.includes('gsm') || c.includes('paper_stock') || c.includes('paper_quality') || c.includes('paper_material')
+      );
+    });
+
+    const groups = { specs: [], paper: [], printing: [], finish: [] };
+    const pushIfVisible = (item, isAddon) => {
+      const optName = hasDynamic ? (item.customLabel || item.master?.name) : item.optionName;
+      const optCode = hasDynamic ? item.master?.code : item.optionName;
+      if (compatibilityResult.hiddenOptions.includes(optName) || compatibilityResult.hiddenOptions.includes(optCode)) return;
+      groups[classifyConfigGroup(optName, optCode, isAddon)].push({ item, isAddon });
+    };
+    coreList.forEach((item) => pushIfVisible(item, false));
+    addonList.forEach((item) => pushIfVisible(item, true));
+
+    const groupOrder = ['specs', 'paper', 'printing', 'finish'].filter(
+      (g) => groups[g].length > 0 || (g === 'paper' && !hasGsmInCore)
+    );
+
+    return { hasDynamic, hasGsmInCore, groups, groupOrder };
+  }, [product, compatibilityResult]);
 
   // Dynamic combination & compatibility checker
   const isOptionValueAvailable = (optName, valLabel, optCode) => {
@@ -654,253 +752,7 @@ export default function ProductDetail() {
             </div>
           </div>
 
-          {/* Step 1: Core Specifications & Dimensions (Size, Material, GSM, Side, Lamination, Shape) */}
-          {(() => {
-            const hasDynamic = product.optionMappings && product.optionMappings.length > 0;
-            const coreList = hasDynamic
-              ? [...product.optionMappings]
-                  .filter((m) => !m.isAddon && m.isEnabled !== false)
-                  .sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0))
-              : (product.options || []).filter((o) => !o.isAddon);
-
-            const hasGsmInCore = coreList.some((item) => {
-              const n = (hasDynamic ? (item.customLabel || item.master?.name) : item.optionName || '').toLowerCase();
-              const c = (hasDynamic ? (item.master?.code) : '').toLowerCase();
-              return (
-                n.includes('gsm') ||
-                n.includes('paper stock') ||
-                n.includes('paper quality') ||
-                n.includes('paper material') ||
-                c.includes('gsm') ||
-                c.includes('paper_stock') ||
-                c.includes('paper_quality') ||
-                c.includes('paper_material')
-              );
-            });
-
-            return (
-              <div className="mt-6 pt-4 border-t space-y-4">
-                <div className="flex items-center justify-between">
-                  <label className="block font-extrabold text-xs uppercase tracking-wider text-gray-800">
-                    Step 1: Configuration Options
-                  </label>
-                  {hasDynamic && (
-                    <span className="text-[10px] text-gray-400 font-medium">
-                      Tailored specifically for {product.name}
-                    </span>
-                  )}
-                </div>
-
-                {/* If product has no explicit GSM option mapped in DB, provide universal Paper GSM interactive selector */}
-                {!hasGsmInCore && (
-                  <PaperGsmSelector
-                    product={product}
-                    selectedGsm={selectedOptions['Paper GSM'] || selectedOptions['GSM'] || '80 GSM'}
-                    onSelectGsm={(val) => handleOptionChange('Paper GSM', val)}
-                    isAvailableFn={() => true}
-                  />
-                )}
-
-                {coreList.map((item, idx) => {
-                  const optName = hasDynamic ? (item.customLabel || item.master?.name) : item.optionName;
-                  const optCode = hasDynamic ? item.master?.code : item.optionName;
-                  const isRequired = hasDynamic ? item.isRequired !== false : true;
-
-                  if (
-                    compatibilityResult.hiddenOptions.includes(optName) ||
-                    compatibilityResult.hiddenOptions.includes(optCode)
-                  ) {
-                    return null;
-                  }
-
-                  const isGsmItem =
-                    (optCode && (optCode.includes('gsm') || optCode.includes('paper_stock') || optCode.includes('paper_quality') || optCode.includes('paper_material'))) ||
-                    (optName && (optName.toLowerCase().includes('gsm') || optName.toLowerCase().includes('paper stock') || optName.toLowerCase().includes('paper quality') || optName.toLowerCase().includes('paper material')));
-
-                  if (isGsmItem) {
-                    return (
-                      <PaperGsmSelector
-                        key={item.id || optName}
-                        product={product}
-                        selectedGsm={selectedOptions[optName]}
-                        onSelectGsm={(val) => handleOptionChange(optName, val)}
-                        optionConfig={item}
-                        isAvailableFn={(valLabel) => isOptionValueAvailable(optName, valLabel, optCode)}
-                      />
-                    );
-                  }
-
-                  const valuesList = hasDynamic
-                    ? (item.valueMappings || [])
-                        .filter((vm) => vm.isEnabled !== false)
-                        .sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0))
-                        .map((vm) => ({
-                          id: vm.id,
-                          valueLabel: vm.customLabel || vm.masterValue?.label,
-                          priceModifierType: vm.priceModifierType,
-                          priceModifierValue: vm.priceModifierValue,
-                        }))
-                    : (item.values || []);
-
-                  return (
-                    <div key={item.id || optName} className="space-y-1.5">
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-bold text-xs text-gray-700">
-                          {idx + 1}. {optName}
-                        </span>
-                        {isRequired && <span className="text-red-500 text-xs font-black">*</span>}
-                        {selectedOptions[optName] && (
-                          <span className="text-[11px] text-purple-700 font-bold ml-auto">
-                            Selected: {selectedOptions[optName]}
-                          </span>
-                        )}
-                      </div>
-
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                        {valuesList.map((v) => {
-                          const isSelected = selectedOptions[optName] === v.valueLabel;
-                          const isAvailable = isOptionValueAvailable(optName, v.valueLabel, optCode);
-
-                          return (
-                            <button
-                              key={v.id || v.valueLabel}
-                              type="button"
-                              disabled={!isAvailable}
-                              onClick={() => handleOptionChange(optName, v.valueLabel)}
-                              className={`p-2.5 rounded-xl border text-left transition-all relative ${
-                                !isAvailable
-                                  ? 'opacity-40 cursor-not-allowed bg-gray-100 border-gray-200 line-through text-gray-400'
-                                  : isSelected
-                                  ? 'border-yellow-400 bg-yellow-50 text-black font-black ring-2 ring-yellow-400 shadow-xs'
-                                  : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300 font-semibold'
-                              }`}
-                            >
-                              <span className="text-xs block leading-tight">{v.valueLabel}</span>
-                              {v.priceModifierValue > 0 && isAvailable && (
-                                <span className="text-[10px] text-red-600 font-bold block mt-0.5">
-                                  +{v.priceModifierType === 'PERCENT' ? `${v.priceModifierValue}%` : `₹${v.priceModifierValue}`}
-                                </span>
-                              )}
-                              {!isAvailable && (
-                                <span className="text-[9px] text-red-500 font-semibold block mt-0.5 not-italic">
-                                  Incompatible
-                                </span>
-                              )}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            );
-          })()}
-
-          {/* Step 2: Optional Premium Finishes & Add-Ons (Spot UV, Foil, Die Cut, Rounded Corners) */}
-          {(() => {
-            const hasDynamic = product.optionMappings && product.optionMappings.length > 0;
-            const addonList = hasDynamic
-              ? [...product.optionMappings]
-                  .filter((m) => m.isAddon && m.isEnabled !== false)
-                  .sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0))
-              : (product.options || []).filter((o) => o.isAddon);
-
-            if (!addonList.length) return null;
-
-            return (
-              <div className="mt-6 pt-4 border-t space-y-4">
-                <div className="flex justify-between items-center">
-                  <label className="font-extrabold text-xs uppercase tracking-wider text-purple-900">
-                    Step 2: Optional Premium Finishes & Add-Ons
-                  </label>
-                  <span className="text-[11px] text-purple-700 font-bold">✨ Optional Enhancements</span>
-                </div>
-
-                {addonList.map((item) => {
-                  const optName = hasDynamic ? (item.customLabel || item.master?.name) : item.optionName;
-                  const optCode = hasDynamic ? item.master?.code : item.optionName;
-
-                  if (
-                    compatibilityResult.hiddenOptions.includes(optName) ||
-                    compatibilityResult.hiddenOptions.includes(optCode)
-                  ) {
-                    return null;
-                  }
-
-                  const valuesList = hasDynamic
-                    ? (item.valueMappings || [])
-                        .filter((vm) => vm.isEnabled !== false)
-                        .sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0))
-                        .map((vm) => ({
-                          id: vm.id,
-                          valueLabel: vm.customLabel || vm.masterValue?.label,
-                          priceModifierType: vm.priceModifierType,
-                          priceModifierValue: vm.priceModifierValue,
-                        }))
-                    : (item.values || []);
-
-                  return (
-                    <div key={item.id || optName} className="bg-purple-50/40 p-3.5 rounded-2xl border border-purple-100">
-                      <div className="flex justify-between items-center mb-2">
-                        <span className="block font-bold text-xs text-purple-950">{optName}</span>
-                        {selectedOptions[optName] && (
-                          <span className="text-[10px] text-purple-700 font-extrabold bg-purple-100 px-2 py-0.5 rounded-full">
-                            Applied: {selectedOptions[optName]}
-                          </span>
-                        )}
-                      </div>
-
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                        {valuesList.map((v) => {
-                          const isSelected = selectedOptions[optName] === v.valueLabel;
-                          const isAvailable = isOptionValueAvailable(optName, v.valueLabel, optCode);
-
-                          return (
-                            <button
-                              key={v.id || v.valueLabel}
-                              type="button"
-                              disabled={!isAvailable}
-                              onClick={() => {
-                                if (isSelected) {
-                                  const copy = { ...selectedOptions };
-                                  delete copy[optName];
-                                  setSelectedOptions(copy);
-                                } else {
-                                  handleOptionChange(optName, v.valueLabel);
-                                }
-                              }}
-                              className={`p-2.5 rounded-xl border text-left transition-all ${
-                                !isAvailable
-                                  ? 'opacity-40 cursor-not-allowed bg-gray-100 border-gray-200 line-through text-gray-400'
-                                  : isSelected
-                                  ? 'border-purple-600 bg-purple-100 text-purple-950 font-black ring-2 ring-purple-400 shadow-xs'
-                                  : 'border-gray-200 bg-white text-gray-700 hover:border-purple-200 font-semibold'
-                              }`}
-                            >
-                              <span className="text-xs block leading-tight">{v.valueLabel}</span>
-                              {v.priceModifierValue > 0 && isAvailable && (
-                                <span className="text-[10px] text-purple-700 font-black block mt-0.5">
-                                  +{v.priceModifierType === 'PERCENT' ? `${v.priceModifierValue}%` : `₹${v.priceModifierValue}`}
-                                </span>
-                              )}
-                              {!isAvailable && (
-                                <span className="text-[9px] text-red-500 font-semibold block mt-0.5 not-italic">
-                                  Incompatible
-                                </span>
-                              )}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            );
-          })()}
-
-          {/* Step 3: Quantity Selection & Dynamic Volume Tier Pricing */}
+          {/* Step 1: Quantity (always first — every product needs it) */}
           <div className="mt-6 pt-4 border-t">
             <DynamicQuantityTierPricing
               product={product}
@@ -913,7 +765,167 @@ export default function ProductDetail() {
             />
           </div>
 
-          {/* Step 4: Mandatory Artwork & Design Options (Phase 16) */}
+          {/* Guided Configuration Flow: one section open at a time instead of one long form.
+              Only groups that actually have an applicable, customer-visible, mapped option (or,
+              for Paper, need the universal GSM fallback) are rendered — nothing hardcoded per
+              product. Numbering continues on from Quantity (step 1) above. */}
+          {configGroups.groupOrder.map((groupKey, groupIdx) => {
+            const meta = CONFIG_GROUP_META[groupKey];
+            const Icon = meta.icon;
+            const isOpen = openConfigGroup === groupKey || (openConfigGroup === null && groupIdx === 0);
+            const stepNum = groupIdx + 2;
+
+            const chosenPreview = configGroups.groups[groupKey]
+              .map(({ item }) => {
+                const optName = configGroups.hasDynamic ? (item.customLabel || item.master?.name) : item.optionName;
+                return selectedOptions[optName];
+              })
+              .filter(Boolean)
+              .join(', ');
+
+            return (
+              <div key={groupKey} className="mt-6 pt-4 border-t">
+                <button
+                  type="button"
+                  onClick={() => setOpenConfigGroup(isOpen ? null : groupKey)}
+                  className="w-full flex items-center justify-between gap-2 text-left"
+                >
+                  <span className="flex items-center gap-2 font-extrabold text-xs uppercase tracking-wider text-gray-800">
+                    <Icon className="w-4 h-4 text-yellow-500 flex-shrink-0" />
+                    {stepNum}. {meta.label}
+                  </span>
+                  <span className="flex items-center gap-2 min-w-0">
+                    {!isOpen && chosenPreview && (
+                      <span className="text-[11px] text-gray-500 font-semibold truncate max-w-[140px]">{chosenPreview}</span>
+                    )}
+                    {isOpen ? <HiChevronUp className="w-4 h-4 text-gray-400 flex-shrink-0" /> : <HiChevronDown className="w-4 h-4 text-gray-400 flex-shrink-0" />}
+                  </span>
+                </button>
+
+                {isOpen && (
+                  <div className="mt-4 space-y-4">
+                    {groupKey === 'paper' && !configGroups.hasGsmInCore && (
+                      <PaperGsmSelector
+                        product={product}
+                        selectedGsm={selectedOptions['Paper GSM'] || selectedOptions['GSM'] || '80 GSM'}
+                        onSelectGsm={(val) => handleOptionChange('Paper GSM', val)}
+                        isAvailableFn={() => true}
+                      />
+                    )}
+
+                    {configGroups.groups[groupKey].map(({ item, isAddon }) => {
+                      const optName = configGroups.hasDynamic ? (item.customLabel || item.master?.name) : item.optionName;
+                      const optCode = configGroups.hasDynamic ? item.master?.code : item.optionName;
+                      const isRequired = configGroups.hasDynamic ? item.isRequired !== false : true;
+
+                      const isGsmItem =
+                        (optCode && (optCode.includes('gsm') || optCode.includes('paper_stock') || optCode.includes('paper_quality') || optCode.includes('paper_material'))) ||
+                        (optName && (optName.toLowerCase().includes('gsm') || optName.toLowerCase().includes('paper stock') || optName.toLowerCase().includes('paper quality') || optName.toLowerCase().includes('paper material')));
+
+                      if (isGsmItem) {
+                        return (
+                          <PaperGsmSelector
+                            key={item.id || optName}
+                            product={product}
+                            selectedGsm={selectedOptions[optName]}
+                            onSelectGsm={(val) => handleOptionChange(optName, val)}
+                            optionConfig={item}
+                            isAvailableFn={(valLabel) => isOptionValueAvailable(optName, valLabel, optCode)}
+                          />
+                        );
+                      }
+
+                      const valuesList = configGroups.hasDynamic
+                        ? (item.valueMappings || [])
+                            .filter((vm) => vm.isEnabled !== false)
+                            .sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0))
+                            .map((vm) => ({
+                              id: vm.id,
+                              valueLabel: vm.customLabel || vm.masterValue?.label,
+                              priceModifierType: vm.priceModifierType,
+                              priceModifierValue: vm.priceModifierValue,
+                            }))
+                        : (item.values || []);
+
+                      return (
+                        <div
+                          key={item.id || optName}
+                          className={isAddon ? 'bg-purple-50/40 p-3.5 rounded-2xl border border-purple-100' : 'space-y-1.5'}
+                        >
+                          <div className={isAddon ? 'flex justify-between items-center mb-2' : 'flex items-center gap-1.5'}>
+                            <span className={isAddon ? 'block font-bold text-xs text-purple-950' : 'font-bold text-xs text-gray-700'}>
+                              {getFriendlyOptionLabel(optName)}
+                            </span>
+                            {!isAddon && isRequired && <span className="text-red-500 text-xs font-black">*</span>}
+                            {selectedOptions[optName] && (
+                              <span
+                                className={
+                                  isAddon
+                                    ? 'text-[10px] text-purple-700 font-extrabold bg-purple-100 px-2 py-0.5 rounded-full'
+                                    : 'text-[11px] text-purple-700 font-bold ml-auto'
+                                }
+                              >
+                                {isAddon ? 'Applied' : 'Selected'}: {selectedOptions[optName]}
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                            {valuesList.map((v) => {
+                              const isSelected = selectedOptions[optName] === v.valueLabel;
+                              const isAvailable = isOptionValueAvailable(optName, v.valueLabel, optCode);
+
+                              return (
+                                <button
+                                  key={v.id || v.valueLabel}
+                                  type="button"
+                                  disabled={!isAvailable}
+                                  onClick={() => {
+                                    if (isAddon && isSelected) {
+                                      const copy = { ...selectedOptions };
+                                      delete copy[optName];
+                                      setSelectedOptions(copy);
+                                    } else {
+                                      handleOptionChange(optName, v.valueLabel);
+                                    }
+                                  }}
+                                  className={`p-2.5 rounded-xl border text-left transition-all relative ${
+                                    !isAvailable
+                                      ? 'opacity-40 cursor-not-allowed bg-gray-100 border-gray-200 line-through text-gray-400'
+                                      : isSelected
+                                      ? isAddon
+                                        ? 'border-purple-600 bg-purple-100 text-purple-950 font-black ring-2 ring-purple-400 shadow-xs'
+                                        : 'border-yellow-400 bg-yellow-50 text-black font-black ring-2 ring-yellow-400 shadow-xs'
+                                      : isAddon
+                                      ? 'border-gray-200 bg-white text-gray-700 hover:border-purple-200 font-semibold'
+                                      : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300 font-semibold'
+                                  }`}
+                                >
+                                  <span className="text-xs block leading-tight">{v.valueLabel}</span>
+                                  {v.priceModifierValue > 0 && isAvailable && (
+                                    <span className={`text-[10px] font-bold block mt-0.5 ${isAddon ? 'text-purple-700 font-black' : 'text-red-600'}`}>
+                                      +{v.priceModifierType === 'PERCENT' ? `${v.priceModifierValue}%` : `₹${v.priceModifierValue}`}
+                                    </span>
+                                  )}
+                                  {!isAvailable && (
+                                    <span className="text-[9px] text-red-500 font-semibold block mt-0.5 not-italic">
+                                      Incompatible
+                                    </span>
+                                  )}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+          {/* Final Step: Mandatory Artwork & Design Options (Phase 16) */}
           <div className="mt-8 pt-6 border-t-2 border-dashed border-gray-200">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
               <div>
@@ -922,7 +934,7 @@ export default function ProductDetail() {
                 </span>
                 <h3 className="text-base sm:text-lg font-black text-gray-900 mt-1 flex items-center gap-1.5">
                   <HiOutlineClipboardList className="w-5 h-5 text-purple-600" />
-                  Step 4: Choose Your Artwork & Design Option
+                  {configGroups.groupOrder.length + 2}. Design & Artwork
                 </h3>
               </div>
               <span className="text-xs text-gray-500 font-semibold">
@@ -1851,7 +1863,7 @@ export default function ProductDetail() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
               {Object.entries(selectedOptions).map(([opt, val]) => (
                 <div key={opt} className="flex justify-between py-1 px-2.5 rounded-lg bg-gray-50 border border-gray-100">
-                  <span className="text-gray-500 font-medium truncate mr-2">{opt}:</span>
+                  <span className="text-gray-500 font-medium truncate mr-2">{getFriendlyOptionLabel(opt)}:</span>
                   <span className="text-gray-900 font-bold text-right">{val}</span>
                 </div>
               ))}

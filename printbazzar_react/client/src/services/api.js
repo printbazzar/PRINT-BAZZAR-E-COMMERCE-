@@ -135,45 +135,13 @@ async function request(endpoint, options = {}, isRetry = false) {
     if (endpoint.includes('/admin')) clearApiCache('/admin');
   }
 
-  // Cache-First with Stale-While-Revalidate (SWR) for lightning-fast page transitions
-  if (isGet && !options.noCache && !isRetry) {
-    let cached = apiCache.get(cacheKey);
-    if (!cached && shouldPersistLocally(endpoint)) {
-      cached = getLocalCache(cacheKey);
-      if (cached) {
-        apiCache.set(cacheKey, cached);
-      }
-    }
-
-    if (cached) {
-      const age = Date.now() - cached.timestamp;
-      const freshTtl = getCacheTtl(endpoint);
-      const staleTtl = freshTtl + getStaleGracePeriod(endpoint);
-
-      // Instant 0ms cache hit
-      if (age < freshTtl) {
-        return Promise.resolve(cached.data);
-      }
-
-      // SWR window: Return cached data immediately to UI and revalidate quietly in background
-      if (age < staleTtl) {
-        if (!inFlightRequests.has(cacheKey)) {
-          const bgPromise = executeFetch().catch((err) => {
-            console.warn(`Silent background cache refresh failed on ${endpoint}:`, err);
-          });
-          inFlightRequests.set(cacheKey, bgPromise);
-          bgPromise.finally(() => inFlightRequests.delete(cacheKey));
-        }
-        return Promise.resolve(cached.data);
-      }
-    }
-
-    // Return in-flight request if already in progress to avoid duplicate network calls
-    if (inFlightRequests.has(cacheKey)) {
-      return inFlightRequests.get(cacheKey);
-    }
-  }
-
+  // NOTE: csrfToken/headers/config and the executeFetch definition are computed
+  // BEFORE the cache-first/SWR block below because that block can invoke
+  // executeFetch() (for background revalidation). executeFetch was previously
+  // declared with `const` AFTER this point but called from inside the SWR
+  // branch above its own declaration, throwing "Cannot access 'executeFetch'
+  // before initialization" (TDZ). Moving this block up fixes that while
+  // preserving identical caching/SWR/dedup/refresh/timeout behavior.
   const csrfToken = getCsrfToken();
 
   const headers = {
@@ -291,7 +259,45 @@ async function request(endpoint, options = {}, isRetry = false) {
     console.error(`API error on ${endpoint}:`, error);
     throw error;
   }
-};
+  };
+  // Cache-First with Stale-While-Revalidate (SWR) for lightning-fast page transitions
+  if (isGet && !options.noCache && !isRetry) {
+    let cached = apiCache.get(cacheKey);
+    if (!cached && shouldPersistLocally(endpoint)) {
+      cached = getLocalCache(cacheKey);
+      if (cached) {
+        apiCache.set(cacheKey, cached);
+      }
+    }
+
+    if (cached) {
+      const age = Date.now() - cached.timestamp;
+      const freshTtl = getCacheTtl(endpoint);
+      const staleTtl = freshTtl + getStaleGracePeriod(endpoint);
+
+      // Instant 0ms cache hit
+      if (age < freshTtl) {
+        return Promise.resolve(cached.data);
+      }
+
+      // SWR window: Return cached data immediately to UI and revalidate quietly in background
+      if (age < staleTtl) {
+        if (!inFlightRequests.has(cacheKey)) {
+          const bgPromise = executeFetch().catch((err) => {
+            console.warn(`Silent background cache refresh failed on ${endpoint}:`, err);
+          });
+          inFlightRequests.set(cacheKey, bgPromise);
+          bgPromise.finally(() => inFlightRequests.delete(cacheKey));
+        }
+        return Promise.resolve(cached.data);
+      }
+    }
+
+    // Return in-flight request if already in progress to avoid duplicate network calls
+    if (inFlightRequests.has(cacheKey)) {
+      return inFlightRequests.get(cacheKey);
+    }
+  }
 
   const fetchPromise = executeFetch();
 
@@ -630,6 +636,30 @@ export const api = {
   verifyManagerPin: (data) => request('/admin/pos/verify-manager-pin', { method: 'POST', body: data }),
   createWalkInOrder: (data) => request('/admin/pos/orders', { method: 'POST', body: data }),
   getFrontOfficeDashboard: (date) => request(`/admin/pos/dashboard${date ? `?date=${encodeURIComponent(date)}` : ''}`),
+
+  // ==========================================
+  // PHASE 6A: PRODUCT CONFIGURATION TEMPLATES (ADMIN)
+  // ==========================================
+  getConfigurationTemplates: (params = {}) => {
+    const query = new URLSearchParams(params).toString();
+    return request(`/admin/configuration-templates${query ? `?${query}` : ''}`);
+  },
+  getConfigurationTemplateById: (id) => request(`/admin/configuration-templates/${id}`),
+  createConfigurationTemplate: (data) => request('/admin/configuration-templates', { method: 'POST', body: data }),
+  updateConfigurationTemplate: (id, data) => request(`/admin/configuration-templates/${id}`, { method: 'PUT', body: data }),
+  deleteConfigurationTemplate: (id) => request(`/admin/configuration-templates/${id}`, { method: 'DELETE' }),
+  seedDefaultTemplates: () => request('/admin/configuration-templates/seed', { method: 'POST' }),
+
+  // ==========================================
+  // PHASE 6A: QUOTE REQUESTS
+  // ==========================================
+  submitQuoteRequest: (data) => request('/shop/quote-request', { method: 'POST', body: data }),
+  getQuoteRequests: (params = {}) => {
+    const query = new URLSearchParams(params).toString();
+    return request(`/admin/quote-requests${query ? `?${query}` : ''}`);
+  },
+  getQuoteRequestById: (id) => request(`/admin/quote-requests/${id}`),
+  updateQuoteRequest: (id, data) => request(`/admin/quote-requests/${id}`, { method: 'PUT', body: data }),
 };
 
 

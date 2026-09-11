@@ -30,7 +30,7 @@ export default function TrustHighlights() {
   ];
 
   return (
-    <section className="bg-white border-y border-gray-200 py-8 my-6">
+    <section className="bg-white border-y border-gray-200 py-6 sm:py-7">
       <div className="max-w-7xl mx-auto px-4">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
           {highlights.map((item, index) => {

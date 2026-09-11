@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Breadcrumb, TextInput, Textarea, Select, Button, Label } from 'flowbite-react';
+import { Breadcrumb, TextInput, Textarea, Select, Button, Label, Spinner } from 'flowbite-react';
 import {
   HiHome,
   HiOutlineSparkles,
@@ -8,9 +8,11 @@ import {
   HiOutlinePhone,
   HiOutlineMail,
   HiCheckCircle,
+  HiOutlineExclamationCircle,
 } from 'react-icons/hi';
 import { BsWhatsapp } from 'react-icons/bs';
 import { useBusinessInfo } from '../context/BusinessInfoContext';
+import { api } from '../services/api';
 
 export default function QuoteRequestPage() {
   const { businessInfo, getWhatsAppLink } = useBusinessInfo();
@@ -29,6 +31,8 @@ export default function QuoteRequestPage() {
   });
 
   const [submitted, setSubmitted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState('');
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -42,9 +46,51 @@ export default function QuoteRequestPage() {
     }
   }, [quoteTypeParam]);
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    setSubmitted(true);
+    if (submitting) return; // guard against duplicate submissions (double-click, slow network, etc.)
+
+    setSubmitError('');
+
+    // The form's quantity field is free text (e.g. "10,000" or "5000 pcs"); the backend requires
+    // a numeric quantity, so extract the digits before sending.
+    const quantityNum = parseInt(String(formData.quantity).replace(/[^0-9]/g, ''), 10);
+    if (!formData.contactName.trim() || !formData.phone.trim()) {
+      setSubmitError('Please fill in your name and mobile number.');
+      return;
+    }
+    if (!quantityNum || quantityNum < 1) {
+      setSubmitError('Please enter a valid estimated quantity.');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const res = await api.submitQuoteRequest({
+        customerName: formData.contactName,
+        customerEmail: formData.email || undefined,
+        customerMobile: formData.phone,
+        quantity: quantityNum,
+        description: formData.details || undefined,
+        // Fields the backend has no dedicated column for are preserved in the free-form
+        // specificationsJson container it already supports, rather than being dropped.
+        specificationsJson: JSON.stringify({
+          companyName: formData.companyName || undefined,
+          city: formData.city || undefined,
+          serviceType: formData.serviceType,
+        }),
+      });
+
+      if (res.success) {
+        setSubmitted(true);
+      } else {
+        setSubmitError(res.message || 'Failed to submit your quote request. Please try again or use WhatsApp below.');
+      }
+    } catch (err) {
+      setSubmitError(err.message || 'Failed to submit your quote request. Please try again or use WhatsApp below.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const handleWhatsAppQuote = () => {
@@ -193,6 +239,14 @@ export default function QuoteRequestPage() {
                   />
                 </div>
 
+                {/* Error Feedback */}
+                {submitError && (
+                  <div className="flex items-start gap-2 bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-xs sm:text-sm">
+                    <HiOutlineExclamationCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                    <span>{submitError}</span>
+                  </div>
+                )}
+
                 {/* Submission Actions */}
                 <div className="pt-4 flex flex-col sm:flex-row justify-between items-center gap-4 border-t border-gray-100">
                   <div className="flex items-center gap-2 text-gray-500 text-xs">
@@ -204,13 +258,26 @@ export default function QuoteRequestPage() {
                     <Button
                       type="button"
                       onClick={handleWhatsAppQuote}
+                      disabled={submitting}
                       className="bg-green-600 hover:bg-green-700 text-white font-bold w-full sm:w-auto flex items-center justify-center gap-2"
                     >
                       <BsWhatsapp className="w-4 h-4 mr-1.5" />
                       <span>Quote via WhatsApp</span>
                     </Button>
-                    <Button type="submit" color="dark" className="font-extrabold w-full sm:w-auto">
-                      Submit Online Request
+                    <Button
+                      type="submit"
+                      color="dark"
+                      disabled={submitting}
+                      className="font-extrabold w-full sm:w-auto flex items-center justify-center gap-2"
+                    >
+                      {submitting ? (
+                        <>
+                          <Spinner size="sm" light />
+                          <span>Submitting...</span>
+                        </>
+                      ) : (
+                        <span>Submit Online Request</span>
+                      )}
                     </Button>
                   </div>
                 </div>

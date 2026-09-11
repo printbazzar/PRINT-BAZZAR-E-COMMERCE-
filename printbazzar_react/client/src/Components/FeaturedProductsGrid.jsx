@@ -32,27 +32,19 @@ export default function FeaturedProductsGrid() {
   }, []);
 
   return (
-    <section className="py-6 sm:py-8 max-w-7xl mx-auto px-4">
-      {/* Section Header with Consistent Typography */}
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between mb-6 pb-2 border-b border-gray-200 gap-2">
-        <div>
-          <span className="text-[10px] sm:text-xs font-black uppercase tracking-widest text-black bg-yellow-400 px-2.5 py-0.5 rounded-md inline-block mb-1">
-            ★ HANDCRAFTED QUALITY
-          </span>
-          <h2 className="text-xl sm:text-2xl lg:text-3xl font-black text-gray-900 tracking-tight">
-            Featured Print Products
-          </h2>
-          <p className="text-xs sm:text-sm text-gray-500 mt-0.5">
-            Our most popular custom visiting cards, waterproof labels, and business collaterals.
-          </p>
-        </div>
+    <section className="pt-2 sm:pt-3 pb-6 sm:pb-8 max-w-7xl mx-auto px-4">
+      {/* Section Header - simplified, products appear immediately below */}
+      <div className="flex items-center justify-between mb-4 sm:mb-5 pb-2 border-b border-gray-200">
+        <h2 className="text-xl sm:text-2xl lg:text-3xl font-black text-gray-900 tracking-tight">
+          Featured Products
+        </h2>
 
         <Link
           to="/shop"
-          className="text-xs sm:text-sm font-black text-gray-800 hover:text-black flex items-center gap-1 group whitespace-nowrap self-start sm:self-auto"
+          className="text-xs sm:text-sm font-black text-gray-800 hover:text-black flex items-center gap-1 group whitespace-nowrap"
         >
-          <span>View All Catalogue</span>
-          <span className="group-hover:translate-x-1 transition-transform">➔</span>
+          <span>View All</span>
+          <span className="group-hover:translate-x-1 transition-transform duration-200">➔</span>
         </Link>
       </div>
 

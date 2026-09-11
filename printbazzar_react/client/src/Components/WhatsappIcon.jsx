@@ -31,7 +31,7 @@ function Whatsapp() {
     <div className="fixed bottom-18 right-3.5 lg:bottom-5 lg:right-8 z-50">
       <div className={`flex flex-col items-center space-y-3 ${isOpen ? 'block' : 'hidden'}`}>
         {/* WhatsApp Button */}
-        <div className="bg-green-500 hover:bg-green-600 rounded-full p-3 fixed bottom-36 sm:bottom-32 shadow-lg transition-transform hover:scale-110">
+        <div className="bg-green-500 hover:bg-green-600 rounded-full p-3 fixed bottom-36 sm:bottom-32 shadow-lg transition-transform duration-200 hover:scale-105">
           <a
             href={getWhatsAppLink(message)}
             target="_blank"
@@ -46,7 +46,7 @@ function Whatsapp() {
         <a
           href={getPhoneLink()}
           aria-label="Call Customer Support"
-          className="bg-blue-500 hover:bg-blue-600 rounded-full p-3 fixed right-[4.5rem] bottom-[6.5rem] sm:right-[6rem] sm:bottom-[5.8rem] md:right-[6.5rem] shadow-lg transition-transform hover:scale-110"
+          className="bg-blue-500 hover:bg-blue-600 rounded-full p-3 fixed right-[4.5rem] bottom-[6.5rem] sm:right-[6rem] sm:bottom-[5.8rem] md:right-[6.5rem] shadow-lg transition-transform duration-200 hover:scale-105"
         >
           <BsTelephone className="w-4 h-4 md:w-6 md:h-6 text-white" />
         </a>
@@ -55,7 +55,7 @@ function Whatsapp() {
         <button
           onClick={handleShare}
           aria-label="Share this page"
-          className="bg-gray-600 hover:bg-gray-700 rounded-full p-3 fixed bottom-20 right-[4.5rem] sm:bottom-6 sm:right-[6rem] md:right-[6.7rem] shadow-lg transition-transform hover:scale-110"
+          className="bg-gray-600 hover:bg-gray-700 rounded-full p-3 fixed bottom-20 right-[4.5rem] sm:bottom-6 sm:right-[6rem] md:right-[6.7rem] shadow-lg transition-transform duration-200 hover:scale-105"
         >
           <BsShare className="w-4 h-4 md:w-6 md:h-6 text-white" />
         </button>
@@ -68,11 +68,11 @@ function Whatsapp() {
         className="focus:outline-none"
       >
         {isOpen ? (
-          <div className="bg-red-500 hover:bg-red-600 rounded-full p-3 mt-3 shadow-xl transition-transform hover:scale-105">
+          <div className="bg-red-500 hover:bg-red-600 rounded-full p-3 mt-3 shadow-xl transition-transform duration-200 hover:scale-105">
             <BsX className="w-4 h-4 md:w-6 md:h-6 text-white" />
           </div>
         ) : (
-          <div className="bg-green-500 hover:bg-green-600 rounded-full p-3 mt-3 shadow-xl transition-transform hover:scale-105 animate-pulse">
+          <div className="bg-green-500 hover:bg-green-600 rounded-full p-3 mt-3 shadow-xl transition-transform duration-200 hover:scale-105">
             <BsWhatsapp className="w-5 h-5 md:w-6 md:h-6 text-white" />
           </div>
         )}

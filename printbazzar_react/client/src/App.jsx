@@ -53,6 +53,8 @@ const AdminBusinessSettings = lazy(() => import("./admin/AdminBusinessSettings")
 const AdminAuditLogs = lazy(() => import("./admin/AdminAuditLogs"));
 const AdminProductConfigurator = lazy(() => import("./admin/AdminProductConfigurator"));
 const AdminOptionMasterManager = lazy(() => import("./admin/AdminOptionMasterManager"));
+const AdminTemplates = lazy(() => import("./admin/AdminTemplates"));
+const AdminQuoteRequests = lazy(() => import("./admin/AdminQuoteRequests"));
 const AdminPOS = lazy(() => import("./admin/AdminPOS"));
 const AdminFrontOfficeDashboard = lazy(() => import("./admin/AdminFrontOfficeDashboard"));
 const AdminProductionQueue = lazy(() => import("./admin/AdminProductionQueue"));
@@ -109,39 +111,19 @@ function App() {
     document.title = "Print Bazzar Admin Control Panel";
   }
 
+  // NOTE: Pruned to only the entries whose target slug the generic LegacyCatchAll
+  // component (below) cannot reproduce on its own (consecutive-capital acronyms
+  // like "UV"/"ID" are not split by its case-transition regex, and
+  // "/CustomShapeStickers" does not end in "Details" so the catch-all never
+  // matches it at all). All other legacy *Details entries were removed here
+  // because LegacyCatchAll already redirects them to the identical target.
   const legacyRouteList = [
-    { path: "/StandardCardDetails", target: "standard-card" },
-    { path: "/LaminatedCardDetails", target: "laminated-card" },
-    { path: "/EconomicalCardDetails", target: "economical-card" },
-    { path: "/TexturedCardDetails", target: "textured-card" },
-    { path: "/SquareCardDetails", target: "square-card" },
-    { path: "/MetallicCardDetails", target: "metallic-card" },
-    { path: "/FoilCardDetails", target: "foil-card" },
     { path: "/RaisedUVCardDetails", target: "raised-uv-card" },
     { path: "/SpotUVCardDetails", target: "spot-uv-card" },
-    { path: "/SyntheticCardDetails", target: "synthetic-card" },
-    { path: "/BulkSyntheticCardDetails", target: "bulk-synthetic-card" },
     { path: "/PremiumSpotUVCardDetails", target: "premium-spot-uv-card" },
-    { path: "/DieCuttingCardDetails", target: "die-cutting-card" },
-    { path: "/TranslucentCardDetails", target: "translucent-card" },
-    { path: "/PerfumedCardDetails", target: "perfumed-card" },
-    { path: "/PlantablePaperCardDetails", target: "plantable-paper-card" },
-    { path: "/LetterHeadDetails", target: "letter-head" },
-    { path: "/BillBookDetails", target: "bill-book" },
-    { path: "/BannersDetails", target: "banners" },
-    { path: "/CircleStickersDetails", target: "circle-stickers" },
-    { path: "/CustomShapeStickersDetails", target: "custom-shape-stickers" },
     { path: "/CustomShapeStickers", target: "custom-shape-stickers" },
-    { path: "/A4MultiColorFlyersDetails", target: "a4-multi-color-flyers" },
-    { path: "/RollupStandeeDetails", target: "rollup-standee" },
     { path: "/IDCardDetails", target: "id-card" },
     { path: "/IDCardsSetDetails", target: "id-cards-set" },
-    { path: "/LanyardsDetails", target: "lanyards" },
-    { path: "/StandardCertificatesDetails", target: "standard-certificates" },
-    { path: "/PremiumCertificatesDetails", target: "premium-certificates" },
-    { path: "/WeddingInvitationDetails", target: "wedding-invitation" },
-    { path: "/BirthdayInvitationDetails", target: "birthday-invitation" },
-    { path: "/BusinessInvitationDetails", target: "business-invitation" },
   ];
 
   return (
@@ -173,6 +155,8 @@ function App() {
               <Route path="products/edit/:id" element={<AdminProductEditor />} />
               <Route path="products/:id/configuration" element={<AdminProductConfigurator />} />
               <Route path="options-master" element={<AdminOptionMasterManager />} />
+              <Route path="configuration-templates" element={<AdminTemplates />} />
+              <Route path="quote-requests" element={<AdminQuoteRequests />} />
               <Route path="categories" element={<AdminCategories />} />
               <Route path="banners" element={<AdminBanners />} />
               <Route path="orders" element={<AdminOrders />} />
@@ -235,14 +219,6 @@ function App() {
           />
           <Route
             path="/shop"
-            element={
-              <StorefrontLayout>
-                <Shop />
-              </StorefrontLayout>
-            }
-          />
-          <Route
-            path="/products"
             element={
               <StorefrontLayout>
                 <Shop />

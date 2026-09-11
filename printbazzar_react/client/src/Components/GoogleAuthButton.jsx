@@ -47,11 +47,15 @@ export default function GoogleAuthButton({
   const { loginWithGoogle } = useCustomerAuth();
   const [loading, setLoading] = useState(false);
   const [showDevModal, setShowDevModal] = useState(false);
+  const [showUnavailable, setShowUnavailable] = useState(false);
   const [devEmail, setDevEmail] = useState('');
   const [devName, setDevName] = useState('');
   const googleBtnContainerRef = useRef(null);
 
   const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+  // Vite statically replaces import.meta.env.DEV at build time (false in production builds),
+  // so the demo/fake-identity modal below is dead-code-eliminated from production bundles.
+  const isDev = import.meta.env.DEV;
 
   // Load Google Identity Services SDK
   useEffect(() => {
@@ -113,8 +117,13 @@ export default function GoogleAuthButton({
       try {
         window.google.accounts.id.prompt((notification) => {
           if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
-            // Fall back to dev/demo modal if prompt blocked by browser
-            setShowDevModal(true);
+            // Real Google prompt was blocked/skipped by the browser.
+            // Dev builds may fall back to the demo picker; production never does.
+            if (isDev) {
+              setShowDevModal(true);
+            } else {
+              setShowUnavailable(true);
+            }
           }
         });
         return;
@@ -123,8 +132,13 @@ export default function GoogleAuthButton({
       }
     }
 
-    // Default fast 1-click fallback for development and testing
-    setShowDevModal(true);
+    // Google SDK/client ID unavailable: dev builds may use the demo picker for
+    // local testing; production shows an unavailable message and creates no session.
+    if (isDev) {
+      setShowDevModal(true);
+    } else {
+      setShowUnavailable(true);
+    }
   };
 
   const handleDevModalSubmit = async (e) => {
@@ -172,7 +186,28 @@ export default function GoogleAuthButton({
         <span className="truncate">{loading ? 'Connecting to Google...' : text}</span>
       </button>
 
-      {/* Development / Immediate 1-Click Google Account Selector Modal */}
+      {/* Production: Google Sign-In temporarily unavailable — never creates a session */}
+      <Modal show={showUnavailable} size="sm" onClose={() => setShowUnavailable(false)} popup>
+        <Modal.Header />
+        <Modal.Body className="pt-0 text-center">
+          <div className="mx-auto w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mb-3">
+            <GoogleIcon className="w-6 h-6 opacity-60" />
+          </div>
+          <h3 className="text-base font-bold text-gray-900 mb-1">Google Sign-In Unavailable</h3>
+          <p className="text-xs text-gray-500 mb-4">
+            Google Sign-In is temporarily unavailable. Please continue with email or mobile sign-in instead.
+          </p>
+          <Button size="xs" color="gray" onClick={() => setShowUnavailable(false)}>
+            Close
+          </Button>
+        </Modal.Body>
+      </Modal>
+
+      {/* Development-only / Immediate 1-Click Google Account Selector Modal.
+          Gated on import.meta.env.DEV so this — including the hardcoded demo
+          identities and free-text email field — is dead-code-eliminated from
+          production builds and can never render or execute in production. */}
+      {isDev && (
       <Modal show={showDevModal} size="md" onClose={() => setShowDevModal(false)} popup>
         <Modal.Header />
         <Modal.Body className="pt-0">
@@ -280,6 +315,7 @@ export default function GoogleAuthButton({
           </form>
         </Modal.Body>
       </Modal>
+      )}
     </>
   );
 }

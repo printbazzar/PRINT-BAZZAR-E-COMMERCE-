@@ -188,6 +188,20 @@ import {
   markNotificationRead,
   markAllNotificationsRead,
 } from '../controllers/staffNotificationController.js';
+import {
+  getConfigurationTemplates,
+  getConfigurationTemplateById,
+  createConfigurationTemplate,
+  updateConfigurationTemplate,
+  deleteConfigurationTemplate,
+  seedDefaultTemplates,
+} from '../controllers/configurationTemplateController.js';
+import {
+  createQuoteRequest,
+  getQuoteRequests,
+  getQuoteRequestById,
+  updateQuoteRequest,
+} from '../controllers/quoteRequestController.js';
 
 const router = express.Router();
 
@@ -244,6 +258,9 @@ router.get('/design-services/addons', getDesignAddons);
 router.get('/design-services/product/:productId', getProductDesignMapping);
 router.post('/design-orders/:id/feedback', submitRevisionFeedback);
 router.post('/design-orders/:id/approve', approveDesign);
+
+// Custom Quote Requests (Public — guest & authenticated customers)
+router.post('/shop/quote-request', createQuoteRequest);
 
 // Store Settings (Public Info)
 router.get('/settings/public', getPublicSettings);
@@ -406,6 +423,23 @@ router.post('/admin/operations/jobs/:id/report-issue', authenticateAdmin, requir
 router.post('/admin/operations/issues/:id/resolve', authenticateAdmin, requirePermission('ORDER_UPDATE'), resolveJobIssue);
 router.get('/admin/operations/department-dashboard', authenticateAdmin, requirePermission('REPORT_VIEW'), getDepartmentDashboard);
 router.get('/admin/operations/manager-overview', authenticateAdmin, requirePermission('REPORT_VIEW'), getManagerOverview);
+
+// ==========================================
+// PHASE 6A: PRODUCT CONFIGURATION TEMPLATES & QUOTE REQUESTS
+// ==========================================
+
+// Configuration Templates (Admin CMS — reusable product configuration blueprints)
+router.get('/admin/configuration-templates', authenticateAdmin, getConfigurationTemplates);
+router.get('/admin/configuration-templates/:id', authenticateAdmin, getConfigurationTemplateById);
+router.post('/admin/configuration-templates', authenticateAdmin, requirePermission('PRODUCT_EDIT'), createConfigurationTemplate);
+router.put('/admin/configuration-templates/:id', authenticateAdmin, requirePermission('PRODUCT_EDIT'), updateConfigurationTemplate);
+router.delete('/admin/configuration-templates/:id', authenticateAdmin, requirePermission('PRODUCT_EDIT'), deleteConfigurationTemplate);
+router.post('/admin/configuration-templates/seed', authenticateAdmin, requirePermission('PRODUCT_EDIT'), seedDefaultTemplates);
+
+// Quote Requests (Admin — review & respond to customer custom-quote submissions)
+router.get('/admin/quote-requests', authenticateAdmin, requirePermission('ORDER_VIEW'), getQuoteRequests);
+router.get('/admin/quote-requests/:id', authenticateAdmin, requirePermission('ORDER_VIEW'), getQuoteRequestById);
+router.put('/admin/quote-requests/:id', authenticateAdmin, requirePermission('ORDER_UPDATE'), updateQuoteRequest);
 
 // Staff Notifications
 router.get('/admin/staff-notifications', authenticateAdmin, getStaffNotifications);

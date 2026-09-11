@@ -1,5 +1,6 @@
 import bcrypt from 'bcryptjs';
 import { PrismaClient } from '@prisma/client';
+import { OAuth2Client } from 'google-auth-library';
 import { signToken, verifyToken } from '../config/jwt.js';
 import {
   createSession,
@@ -16,6 +17,11 @@ import { getOtpConfig } from '../config/otpConfig.js';
 export { authenticateCustomer } from '../middleware/auth.js';
 
 const prisma = new PrismaClient();
+
+// Google ID-token verifier. GOOGLE_CLIENT_ID is loaded by the time this module
+// evaluates because customerAuthController.js imports config/jwt.js above,
+// which calls dotenv.config() as a side effect during its own module init.
+const googleOAuthClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 // Helper: Generate Customer JWT Token
 const generateCustomerToken = (customer) => {
@@ -273,51 +279,53 @@ export const customerLogin = async (req, res) => {
  */
 export const customerGoogleLogin = async (req, res) => {
   try {
-    const { credential, email: directEmail, name: directName, googleId: directGoogleId, avatarUrl: directAvatar } = req.body;
+    const { credential } = req.body;
 
-    let googleUser = null;
-
-    if (credential) {
-      // Decode and parse Google JWT credential payload
-      try {
-        const parts = credential.split('.');
-        if (parts.length === 3) {
-          const payloadBase64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
-          const decodedJson = Buffer.from(payloadBase64, 'base64').toString('utf8');
-          const payload = JSON.parse(decodedJson);
-
-          if (payload && payload.email) {
-            googleUser = {
-              email: payload.email.toLowerCase().trim(),
-              name: payload.name || payload.given_name || payload.email.split('@')[0],
-              googleId: payload.sub,
-              avatarUrl: payload.picture || null,
-              emailVerified: Boolean(payload.email_verified),
-            };
-          }
-        }
-      } catch (parseErr) {
-        console.warn('Failed to parse Google credential JWT:', parseErr.message);
-      }
-    }
-
-    // Direct fallback if profile passed explicitly or parsed from token
-    if (!googleUser && directEmail) {
-      googleUser = {
-        email: directEmail.toLowerCase().trim(),
-        name: directName || directEmail.split('@')[0],
-        googleId: directGoogleId || `google_${Date.now()}`,
-        avatarUrl: directAvatar || null,
-        emailVerified: true,
-      };
-    }
-
-    if (!googleUser || !googleUser.email) {
+    if (!credential || typeof credential !== 'string') {
       return res.status(400).json({
         success: false,
-        message: 'Invalid Google authentication token or email missing.',
+        message: 'Google credential is required.',
       });
     }
+
+    if (!process.env.GOOGLE_CLIENT_ID) {
+      console.error('[Google Auth] GOOGLE_CLIENT_ID is not configured on the server.');
+      return res.status(503).json({
+        success: false,
+        message: 'Google Sign-In is temporarily unavailable. Please use email or mobile sign-in.',
+      });
+    }
+
+    // Cryptographically verify the Google ID token: signature, issuer, audience,
+    // and expiry are all checked by verifyIdToken() against Google's published keys.
+    let payload;
+    try {
+      const ticket = await googleOAuthClient.verifyIdToken({
+        idToken: credential,
+        audience: process.env.GOOGLE_CLIENT_ID,
+      });
+      payload = ticket.getPayload();
+    } catch (verifyErr) {
+      console.warn('Google ID token verification failed:', verifyErr.message);
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid or expired Google authentication token.',
+      });
+    }
+
+    if (!payload || !payload.email || payload.email_verified !== true) {
+      return res.status(401).json({
+        success: false,
+        message: 'Google account email is not verified.',
+      });
+    }
+
+    const googleUser = {
+      email: payload.email.toLowerCase().trim(),
+      name: payload.name || payload.given_name || payload.email.split('@')[0],
+      googleId: payload.sub,
+      avatarUrl: payload.picture || null,
+    };
 
     // Look up customer by googleId or email
     let customer = await prisma.customer.findFirst({

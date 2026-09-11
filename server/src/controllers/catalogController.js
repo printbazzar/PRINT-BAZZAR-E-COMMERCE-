@@ -255,10 +255,20 @@ export const getProductBySlug = async (req, res) => {
           },
         },
         optionMappings: {
-          where: { isEnabled: true },
+          where: {
+            isEnabled: true,
+            visibility: 'CUSTOMER_VISIBLE', // Phase 6A: Filter out INTERNAL_ONLY and ADMIN_ONLY from public storefront
+          },
           orderBy: { displayOrder: 'asc' },
           include: {
-            master: true,
+            master: {
+              select: {
+                id: true, code: true, name: true, description: true, optionType: true,
+                helpText: true, tooltip: true, imageUrl: true, unit: true,
+                minValue: true, maxValue: true, stepValue: true,
+                isAddon: true, displayOrder: true,
+              },
+            },
             valueMappings: {
               where: { isEnabled: true },
               orderBy: { displayOrder: 'asc' },

@@ -218,6 +218,8 @@ export const createProduct = async (req, res) => {
       isFeatured,
       isBestSeller,
       isNewArrival,
+      metaTitle,
+      metaDescription,
       status = 'ACTIVE',
       quantityType = 'FIXED',
       customQtyMin = 100,
@@ -676,6 +678,9 @@ export const duplicateProduct = async (req, res) => {
         specifications: true,
         priceSlabs: true,
         options: { include: { values: true } },
+        optionMappings: { include: { valueMappings: true } },
+        pricingMatrices: true,
+        compatibilityRules: true,
       },
     });
 
@@ -698,9 +703,29 @@ export const duplicateProduct = async (req, res) => {
         startingPrice: source.startingPrice,
         minQuantity: source.minQuantity,
         maxQuantity: source.maxQuantity,
+        quantityUnit: source.quantityUnit,
+        quantityType: source.quantityType,
+        customQtyMin: source.customQtyMin,
+        customQtyMax: source.customQtyMax,
+        customQtyStep: source.customQtyStep,
+        customUnitPrice: source.customUnitPrice,
+        pricingType: source.pricingType,
+        pricingSource: source.pricingSource,
+        gstPercentage: source.gstPercentage,
+        productionDays: source.productionDays,
+        singleSideDesignCharge: source.singleSideDesignCharge,
+        doubleSideDesignCharge: source.doubleSideDesignCharge,
         turnaroundTime: source.turnaroundTime,
         deliveryInfo: source.deliveryInfo,
         hasCustomDesign: source.hasCustomDesign,
+        // Phase 6A fields
+        templateId: source.templateId,
+        templateVersion: source.templateVersion,
+        templateSnapshotJson: source.templateSnapshotJson,
+        pricingFormulaJson: source.pricingFormulaJson,
+        productionDepartment: source.productionDepartment,
+        productionMachine: source.productionMachine,
+        qcChecklistJson: source.qcChecklistJson,
         status: 'DRAFT', // draft by default
         images: {
           create: source.images.map((img) => ({
@@ -729,6 +754,7 @@ export const duplicateProduct = async (req, res) => {
       },
     });
 
+    // Clone legacy ProductOption + values
     for (const opt of source.options) {
       await prisma.productOption.create({
         data: {
@@ -749,9 +775,85 @@ export const duplicateProduct = async (req, res) => {
       });
     }
 
+    // Phase 6A: Deep-clone modern optionMappings + valueMappings
+    for (const mapping of source.optionMappings) {
+      const newMapping = await prisma.productOptionMapping.create({
+        data: {
+          productId: cloned.id,
+          masterId: mapping.masterId,
+          customLabel: mapping.customLabel,
+          visibility: mapping.visibility,
+          helpText: mapping.helpText,
+          tooltip: mapping.tooltip,
+          imageUrl: mapping.imageUrl,
+          unit: mapping.unit,
+          minValue: mapping.minValue,
+          maxValue: mapping.maxValue,
+          stepValue: mapping.stepValue,
+          isRequired: mapping.isRequired,
+          isAddon: mapping.isAddon,
+          defaultValue: mapping.defaultValue,
+          displayOrder: mapping.displayOrder,
+          pricingBehavior: mapping.pricingBehavior,
+          isEnabled: mapping.isEnabled,
+        },
+      });
+
+      // Clone value mappings under the new mapping
+      if (mapping.valueMappings && mapping.valueMappings.length > 0) {
+        await prisma.productOptionValueMapping.createMany({
+          data: mapping.valueMappings.map((vm) => ({
+            mappingId: newMapping.id,
+            masterValueId: vm.masterValueId,
+            customLabel: vm.customLabel,
+            priceModifierType: vm.priceModifierType,
+            priceModifierValue: vm.priceModifierValue,
+            isDefault: vm.isDefault,
+            isEnabled: vm.isEnabled,
+            displayOrder: vm.displayOrder,
+          })),
+        });
+      }
+    }
+
+    // Phase 6A: Deep-clone pricing matrices
+    if (source.pricingMatrices.length > 0) {
+      await prisma.productPricingMatrix.createMany({
+        data: source.pricingMatrices.map((pm) => ({
+          productId: cloned.id,
+          combinationKey: pm.combinationKey,
+          optionsJson: pm.optionsJson,
+          quantity: pm.quantity,
+          price: pm.price,
+          unitPrice: pm.unitPrice,
+          sku: pm.sku,
+          isAvailable: pm.isAvailable,
+          displayOrder: pm.displayOrder,
+        })),
+      });
+    }
+
+    // Phase 6A: Deep-clone compatibility rules
+    if (source.compatibilityRules.length > 0) {
+      await prisma.productCompatibilityRule.createMany({
+        data: source.compatibilityRules.map((rule) => ({
+          productId: cloned.id,
+          ruleName: rule.ruleName,
+          triggerOptionCode: rule.triggerOptionCode,
+          triggerValueCode: rule.triggerValueCode,
+          operator: rule.operator,
+          action: rule.action,
+          targetOptionCode: rule.targetOptionCode,
+          targetValueCode: rule.targetValueCode,
+          reason: rule.reason,
+          isActive: rule.isActive,
+        })),
+      });
+    }
+
     await recordAudit(req.user?.id, 'DUPLICATE_PRODUCT', 'Product', cloned.id, { sourceId: id }, { newId: cloned.id, newSku }, req);
 
-    return res.status(201).json({ success: true, message: 'Product duplicated successfully as Draft.', data: cloned });
+    return res.status(201).json({ success: true, message: 'Product duplicated successfully as Draft (including modern configuration).', data: cloned });
   } catch (error) {
     console.error('Error duplicating product:', error);
     return res.status(500).json({ success: false, message: 'Failed to duplicate product.' });
@@ -847,10 +949,57 @@ export const updateCategory = async (req, res) => {
 export const deleteCategory = async (req, res) => {
   try {
     const { id } = req.params;
+    const { force } = req.query; // ?force=archive to soft-delete instead of rejecting
+
+    const category = await prisma.category.findUnique({
+      where: { id },
+      include: {
+        _count: { select: { products: true, children: true } },
+      },
+    });
+
+    if (!category) {
+      return res.status(404).json({ success: false, message: 'Category not found.' });
+    }
+
+    // Guard: Reject deletion if category has products
+    if (category._count.products > 0) {
+      if (force === 'archive') {
+        // Soft-archive instead of hard delete
+        await prisma.category.update({
+          where: { id },
+          data: { isActive: false },
+        });
+        await recordAudit(req.user?.id, 'ARCHIVE_CATEGORY', 'Category', id, { isActive: true }, { isActive: false, productCount: category._count.products }, req);
+        return res.json({
+          success: true,
+          message: `Category "${category.name}" archived (${category._count.products} product(s) preserved). Use isActive=true to restore.`,
+        });
+      }
+
+      return res.status(400).json({
+        success: false,
+        code: 'CATEGORY_HAS_PRODUCTS',
+        message: `Cannot delete category "${category.name}": ${category._count.products} product(s) belong to it. Use ?force=archive to archive instead, or move products first.`,
+        productCount: category._count.products,
+      });
+    }
+
+    // Guard: Reject deletion if category has children
+    if (category._count.children > 0) {
+      return res.status(400).json({
+        success: false,
+        code: 'CATEGORY_HAS_CHILDREN',
+        message: `Cannot delete category "${category.name}": ${category._count.children} child category(ies) exist. Remove or reassign children first.`,
+        childCount: category._count.children,
+      });
+    }
+
     await prisma.category.delete({ where: { id } });
-    await recordAudit(req.user?.id, 'DELETE_CATEGORY', 'Category', id, null, null, req);
-    return res.json({ success: true, message: 'Category deleted' });
+    await recordAudit(req.user?.id, 'DELETE_CATEGORY', 'Category', id, { name: category.name }, null, req);
+    return res.json({ success: true, message: 'Category deleted.' });
   } catch (error) {
+    console.error('Error deleting category:', error);
     return res.status(500).json({ success: false, message: 'Failed to delete category.' });
   }
 };

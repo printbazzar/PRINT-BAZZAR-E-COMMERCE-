@@ -143,7 +143,7 @@ export default function Header() {
               <HiOutlineShoppingCart className="w-6 h-6 sm:w-7 sm:h-7" />
               <span className="hidden xl:inline text-xs font-bold">Cart</span>
               {cartCount > 0 && (
-                <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[11px] font-black w-5 h-5 rounded-full flex items-center justify-center shadow-md animate-pulse">
+                <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[11px] font-black w-5 h-5 rounded-full flex items-center justify-center shadow-md">
                   {cartCount}
                 </span>
               )}

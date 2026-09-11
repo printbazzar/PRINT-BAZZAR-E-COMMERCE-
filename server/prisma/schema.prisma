@@ -142,6 +142,15 @@ model Product {
   pricingMatrices      ProductPricingMatrix[]
   compatibilityRules   ProductCompatibilityRule[]
   priceVersions        PriceVersion[]
+  templateId             String?
+  template               ProductConfigurationTemplate? @relation(fields: [templateId], references: [id])
+  templateVersion        Int?                  @default(1)
+  templateSnapshotJson   String?               // Immutable snapshot of template when product was published/configured
+  pricingFormulaJson     String?               // For SIZE_BASED: { ratePerSqFt, minAreaSqFt, widthUnit, heightUnit, minWidth, maxWidth, minHeight, maxHeight, installationRate }
+  productionDepartment   String?               @default("PRODUCTION")
+  productionMachine      String?
+  qcChecklistJson        String?               // JSON array of product-specific QC checks
+  quoteRequests          QuoteRequest[]
 
   @@index([categoryId])
   @@index([categoryId, status])
@@ -241,7 +250,15 @@ model OptionMaster {
   code         String               @unique // e.g. "size", "quantity", "gsm", "material", "printing", "lamination", "corner", "finishing", "shape", "orientation", "folding", "foil", "spot_uv"
   name         String               // e.g. "Size", "Quantity", "GSM", "Material", "Printing", "Lamination", "Corner", "Finishing", "Shape", "Orientation", "Folding", "Foil Stamping", "Spot UV"
   description  String?
-  optionType   String               @default("SELECT") // SELECT, RADIO, CHECKBOX, PILLS
+  optionType   String               @default("SELECT") // SELECT, RADIO, CHECKBOX, NUMBER, TEXT, WIDTH_INPUT, HEIGHT_INPUT, QUANTITY_SELECTOR, IMAGE_SELECT, COLOR_SWATCH
+  visibility   String               @default("CUSTOMER_VISIBLE") // CUSTOMER_VISIBLE, INTERNAL_ONLY, ADMIN_ONLY
+  helpText     String?
+  tooltip      String?
+  imageUrl     String?
+  unit         String?              // "mm", "inches", "feet", "gsm", "sq.ft"
+  minValue     Float?
+  maxValue     Float?
+  stepValue    Float?
   isAddon      Boolean              @default(false)
   displayOrder Int                  @default(0)
   isActive     Boolean              @default(true)
@@ -279,6 +296,14 @@ model ProductOptionMapping {
   masterId         String
   master           OptionMaster                @relation(fields: [masterId], references: [id], onDelete: Cascade)
   customLabel      String?
+  visibility       String                      @default("CUSTOMER_VISIBLE") // CUSTOMER_VISIBLE, INTERNAL_ONLY, ADMIN_ONLY
+  helpText         String?
+  tooltip          String?
+  imageUrl         String?
+  unit             String?
+  minValue         Float?
+  maxValue         Float?
+  stepValue        Float?
   isRequired       Boolean                     @default(true)
   isAddon          Boolean                     @default(false)
   defaultValue     String?
@@ -426,6 +451,7 @@ model Customer {
   carts                Cart[]
   savedAddresses       CustomerAddress[]
   authSessions         AuthSession[]
+  quoteRequests        QuoteRequest[]
 
   @@index([mobile])
 }
@@ -1083,4 +1109,64 @@ model StaffNotification {
 }
 
 
+// ==========================================
+// PHASE 6A: PRODUCT CONFIGURATION FOUNDATION
+// ==========================================
 
+model ProductConfigurationTemplate {
+  id                String    @id @default(uuid())
+  code              String    @unique  // e.g. "BUSINESS_CARD_TEMPLATE", "STICKER_TEMPLATE", "SIGNAGE_TEMPLATE"
+  name              String             // e.g. "Business Card Configuration", "Sticker Configuration"
+  description       String?
+  category          String             // e.g. "VISITING_CARDS", "STICKERS", "INVITATIONS", "ROLLUP_STANDEE", "PHOTO_GIFTS", "SIGNAGE"
+  pricingModel      String    @default("MATRIX") // MATRIX, TIERED_SLABS, SIZE_FORMULA, BASE_PLUS_ADDONS, CUSTOM_QUOTE
+  fieldsConfigJson  String             // JSON array of field definitions: [{ code, name, optionType, visibility, isRequired, displayOrder, values, helpText, tooltip, unit, min, max, step, pricingBehavior }]
+  defaultOptionsJson String?           // JSON object of default selected values: { "size": "90x54mm", "printing": "single_side" }
+  qcChecklistJson   String?            // JSON array of template-level QC checks
+  version           Int       @default(1)
+  status            String    @default("DRAFT") // DRAFT, PREVIEW, APPROVED, PUBLISHED, ARCHIVED
+  publishedAt       DateTime?
+  effectiveFrom     DateTime?
+  effectiveTo       DateTime?
+  isActive          Boolean   @default(true)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  products          Product[]
+
+  @@index([category])
+  @@index([status])
+  @@index([code, version])
+}
+
+model QuoteRequest {
+  id                String    @id @default(uuid())
+  quoteNumber       String    @unique  // QR-2026-000001
+  customerId        String?
+  customer          Customer? @relation(fields: [customerId], references: [id])
+  productId         String?
+  product           Product?  @relation(fields: [productId], references: [id])
+  customerName      String
+  customerEmail     String?
+  customerMobile    String
+  specificationsJson String            // JSON object of requested specs: { "width": 4, "height": 3, "material": "vinyl", ... }
+  quantity          Int
+  description       String?            // Free-text description of custom requirements
+  referenceImageUrl String?            // Customer-uploaded reference image
+  quotedPrice       Float?             // Admin-provided quoted price
+  quotedBreakdownJson String?          // JSON price breakdown: { baseRate, materialCost, sizeSurcharge, finishingCost, subtotal, gst, total }
+  status            String    @default("PENDING") // PENDING, QUOTED, ACCEPTED, REJECTED, EXPIRED, CONVERTED_TO_ORDER
+  quotedAt          DateTime?
+  quotedByName      String?
+  respondedAt       DateTime?
+  convertedOrderId  String?            // If accepted & converted to a real order
+  notes             String?            // Internal admin notes
+  validUntil        DateTime?          // Quote expiry date
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([customerId])
+  @@index([productId])
+  @@index([status])
+  @@index([createdAt(sort: Desc)])
+}

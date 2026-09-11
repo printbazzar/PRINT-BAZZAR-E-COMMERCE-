@@ -10,14 +10,19 @@ import LazyImage from './LazyImage';
 export default function ProductCard({ product, index = 0, priority = false }) {
   if (!product) return null;
 
-  // Derive stable ratings and strikethrough original pricing for preview
-  const rating = product.rating || (4.6 + ((product.id ? String(product.id).charCodeAt(0) % 4 : 2) * 0.1)).toFixed(1);
-  const reviewsCount = product.reviewsCount || (40 + ((product.id ? String(product.id).charCodeAt(0) % 50 : 25) * 3));
+  // Only ever use genuine backend-provided rating/review/discount data.
+  // No fabricated/derived values — if the product has no real data, the
+  // corresponding UI (rating row, discount badge, strikethrough price) is
+  // simply omitted below rather than showing a synthetic number.
+  const rating = product.rating || null;
+  const reviewsCount = product.reviewsCount || null;
   const startingPrice = Number(product.startingPrice || product.price || 0);
-  const originalPrice = product.originalPrice || Math.round(startingPrice * 1.25);
-  const discountPercent = startingPrice > 0 && originalPrice > startingPrice
+  const originalPrice = product.originalPrice && Number(product.originalPrice) > startingPrice
+    ? Number(product.originalPrice)
+    : null;
+  const discountPercent = originalPrice
     ? Math.round(((originalPrice - startingPrice) / originalPrice) * 100)
-    : 20;
+    : 0;
 
   const imageUrl =
     product.thumbnailUrl ||
@@ -81,14 +86,18 @@ export default function ProductCard({ product, index = 0, priority = false }) {
           {product.shortDescription || 'Custom GSM paper, double-side options & instant tier rates.'}
         </p>
 
-        {/* Rating & Review Counter */}
-        <div className="flex items-center gap-1.5 px-1 mt-2">
-          <div className="flex items-center text-yellow-400">
-            <HiStar className="w-3.5 h-3.5" />
-            <span className="text-[11px] font-black text-gray-800 ml-0.5">{rating}</span>
+        {/* Rating & Review Counter — only shown when the backend supplies a real rating */}
+        {rating && (
+          <div className="flex items-center gap-1.5 px-1 mt-2">
+            <div className="flex items-center text-yellow-400">
+              <HiStar className="w-3.5 h-3.5" />
+              <span className="text-[11px] font-black text-gray-800 ml-0.5">{rating}</span>
+            </div>
+            {reviewsCount && (
+              <span className="text-[10px] text-gray-400 font-medium">({reviewsCount})</span>
+            )}
           </div>
-          <span className="text-[10px] text-gray-400 font-medium">({reviewsCount})</span>
-        </div>
+        )}
       </div>
 
       {/* Pricing & CTA Section */}
@@ -98,7 +107,7 @@ export default function ProductCard({ product, index = 0, priority = false }) {
             <span className="text-xs sm:text-sm font-black text-gray-900">
               ₹{startingPrice}
             </span>
-            {originalPrice > startingPrice && (
+            {originalPrice && (
               <span className="text-[11px] text-gray-400 line-through font-medium">
                 ₹{originalPrice}
               </span>

@@ -18,6 +18,7 @@ export const configureSecurityHeaders = () => {
           ...(isProduction ? [] : ["'unsafe-eval'"]),
           'https://checkout.razorpay.com',
           'https://*.razorpay.com',
+          'https://accounts.google.com',
         ],
         styleSrc: [
           "'self'",
@@ -51,12 +52,14 @@ export const configureSecurityHeaders = () => {
           'https://lumberjack.razorpay.com',
           'https://*.razorpay.com',
           'https://wa.me',
+          'https://accounts.google.com',
         ],
         frameSrc: [
           "'self'",
           'https://api.razorpay.com',
           'https://checkout.razorpay.com',
           'https://*.razorpay.com',
+          'https://accounts.google.com',
         ],
         objectSrc: ["'none'"],
         baseUri: ["'self'"],

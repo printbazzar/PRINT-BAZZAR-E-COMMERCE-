@@ -70,7 +70,7 @@ export default function DynamicQuantityTierPricing({
             ⚡
           </span>
           <span className="font-extrabold text-xs uppercase tracking-wider text-gray-800">
-            Step 3: Select Quantity & Bulk Savings ({quantityUnit})
+            1. Quantity ({quantityUnit})
           </span>
         </div>
 

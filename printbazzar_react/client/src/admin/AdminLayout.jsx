@@ -19,6 +19,8 @@ import {
   HiOutlineShoppingCart,
   HiOutlineTrendingUp,
   HiOutlinePrinter,
+  HiOutlineTemplate,
+  HiOutlineReceiptTax,
   HiMenu,
   HiX,
 } from 'react-icons/hi';
@@ -31,24 +33,25 @@ export default function AdminLayout() {
   const location = useLocation();
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gray-900 flex items-center justify-center text-white">
-        Loading Admin Session...
-      </div>
-    );
-  }
-
-  if (!isAuthenticated) {
-    navigate('/admin/login', { replace: true, state: { from: location } });
-    return null;
-  }
-
   const isSuperAdmin =
     adminUser?.role?.toLowerCase().includes('super') ||
     adminUser?.role === 'SUPER_ADMIN' ||
     adminUser?.department === 'ALL';
   const department = adminUser?.department;
+  const role = adminUser?.role;
+
+  // Redirect unauthenticated users. Moved into an effect (instead of calling
+  // navigate() directly in the render body) so this component calls the same
+  // hooks in the same order on every render — a conditional early-return
+  // that called navigate() before this effect used to make React see a
+  // different number of hooks between an unauthenticated render and an
+  // authenticated one, triggering "navigate() called during render" and a
+  // hooks-order warning.
+  React.useEffect(() => {
+    if (!loading && !isAuthenticated) {
+      navigate('/admin/login', { replace: true, state: { from: location } });
+    }
+  }, [loading, isAuthenticated, navigate, location]);
 
   // Auto-redirect floor staff directly to their workstation queue
   React.useEffect(() => {
@@ -62,6 +65,18 @@ export default function AdminLayout() {
       }
     }
   }, [loading, isAuthenticated, isSuperAdmin, department, role, location.pathname, navigate]);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-900 flex items-center justify-center text-white">
+        Loading Admin Session...
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return null;
+  }
 
   // Department workstation labels
   const deptWorkstationLabels = {
@@ -87,6 +102,8 @@ export default function AdminLayout() {
       { label: 'Staff & Roles', path: '/admin/staff', icon: HiOutlineUserGroup },
       { label: 'Products CMS', path: '/admin/products', icon: HiOutlineShoppingBag },
       { label: 'Option Masters', path: '/admin/options-master', icon: HiOutlineCollection },
+      { label: 'Configuration Templates', path: '/admin/configuration-templates', icon: HiOutlineTemplate },
+      { label: 'Quote Requests', path: '/admin/quote-requests', icon: HiOutlineReceiptTax },
       { label: 'Pricing Master', path: '/admin/pricing', icon: HiOutlineCurrencyRupee },
       { label: 'Design Services', path: '/admin/design-services', icon: HiOutlineSparkles },
       { label: 'Categories', path: '/admin/categories', icon: HiHome },
