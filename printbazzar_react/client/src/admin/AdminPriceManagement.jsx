@@ -476,7 +476,7 @@ export default function AdminPriceManagement() {
                           </button>
 
                           <Link
-                            to={`/admin/products`}
+                            to={`/admin/products/edit/${p.id}`}
                             className="text-gray-400 hover:text-gray-700 p-1"
                             title="Full Product Editor"
                           >

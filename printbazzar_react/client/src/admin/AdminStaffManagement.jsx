@@ -316,6 +316,10 @@ export default function AdminStaffManagement() {
                 <option value="FINISHING_QC">✂️ FINISHING_QC (Lamination, Cutting & QC)</option>
                 <option value="PACKING">📦 PACKING (Packaging & Dispatch Desk)</option>
                 <option value="DELIVERY">🚚 DELIVERY (Local Courier & Logistics)</option>
+                <option value="MANAGEMENT">🧭 MANAGEMENT (Manager / Admin — Broad Oversight)</option>
+                <option value="SALES">💼 SALES (Customers, Orders & Quotations)</option>
+                <option value="ACCOUNTS">🧾 ACCOUNTS (Payments, Invoices & Reports)</option>
+                <option value="DISPATCH">🚀 DISPATCH (Order Status & Delivery Coordination)</option>
                 <option value="ALL">👑 ALL (Super Admin / Management)</option>
               </Select>
             </div>

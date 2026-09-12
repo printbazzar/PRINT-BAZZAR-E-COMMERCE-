@@ -1030,16 +1030,27 @@ export default function AdminProductEditor() {
         })),
       };
 
+      let newlyCreatedProductId = null;
       if (isEditMode) {
         await api.updateProduct(id, payload);
         setSuccessMessage('Product updated successfully!');
       } else {
-        await api.createProduct(payload);
-        setSuccessMessage('Product created successfully!');
+        const createRes = await api.createProduct(payload);
+        newlyCreatedProductId = createRes?.data?.id || null;
+        setSuccessMessage(
+          newlyCreatedProductId
+            ? 'Product created! Continuing to Configuration & Pricing...'
+            : 'Product created successfully!'
+        );
       }
 
       setTimeout(() => {
-        navigate('/admin/products');
+        if (newlyCreatedProductId) {
+          // Reuses the existing Configuration & Pricing Hub route (no new API/route created)
+          navigate(`/admin/products/${newlyCreatedProductId}/configuration`);
+        } else {
+          navigate('/admin/products');
+        }
       }, 1200);
     } catch (err) {
       setErrorMessage(err.message || 'Failed to save product. Please check fields.');

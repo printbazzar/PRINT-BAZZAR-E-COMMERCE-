@@ -68,7 +68,7 @@ export const createStaff = async (req, res) => {
       where: {
         OR: [
           ...(roleName ? [{ name: roleName }] : []),
-          { name: department === 'DESIGN' ? 'DESIGN_LEAD' : department === 'PRODUCTION' ? 'PRESS_OPERATOR' : department === 'FINISHING_QC' ? 'FINISHING_INSPECTOR' : department === 'PACKING' ? 'PACKING_SUPERVISOR' : department === 'DELIVERY' ? 'DELIVERY_EXECUTIVE' : 'SUPER_ADMIN' },
+          { name: department === 'DESIGN' ? 'DESIGN_LEAD' : department === 'PRODUCTION' ? 'PRESS_OPERATOR' : department === 'FINISHING_QC' ? 'FINISHING_INSPECTOR' : department === 'PACKING' ? 'PACKING_SUPERVISOR' : department === 'DELIVERY' ? 'DELIVERY_EXECUTIVE' : department === 'MANAGEMENT' ? 'MANAGER' : department === 'SALES' ? 'SALES' : department === 'ACCOUNTS' ? 'ACCOUNTS' : department === 'DISPATCH' ? 'DISPATCH' : 'SUPER_ADMIN' },
           { isSystem: true },
         ],
       },

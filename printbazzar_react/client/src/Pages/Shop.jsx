@@ -8,7 +8,6 @@ import {
   HiX,
   HiStar,
   HiOutlineAdjustments,
-  HiCheck,
 } from "react-icons/hi";
 import Feedback from "../Components/Feedback";
 import { api } from "../services/api";
@@ -442,9 +441,6 @@ export default function Shop() {
               ? categories.find((c) => c.slug === selectedCategory)?.name || "Print Catalogue"
               : "All Printing Products & Categories"}
           </h1>
-          <p className="text-xs sm:text-sm text-gray-500 mt-1 max-w-2xl">
-            Custom business visiting cards, vinyl stickers, packaging labels, marketing collaterals, and office stationery with instant tier discounts.
-          </p>
         </div>
 
         {/* Mobile Filter Button */}

@@ -75,7 +75,12 @@ export default function MobileBottomNav({ onOpenCategories, onOpenSearch }) {
         <button
           type="button"
           onClick={onOpenSearch ? onOpenSearch : () => {
-            const searchInput = document.querySelector('input[name="search"], input[type="search"], input[placeholder*="Search"]');
+            // Target the storefront search bar's stable id directly (it is present on
+            // every page this bottom nav renders on, via StorefrontLayout) instead of a
+            // loose attribute match, so this reliably finds the real, visible input.
+            const searchInput =
+              document.getElementById('storefront-search-input') ||
+              document.querySelector('input[name="search"], input[type="search"], input[placeholder*="Search"]');
             if (searchInput) {
               searchInput.focus();
               searchInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -100,7 +105,7 @@ export default function MobileBottomNav({ onOpenCategories, onOpenSearch }) {
           <div className="relative flex items-center justify-center">
             <HiOutlineShoppingCart className="w-5 h-5" />
             {cartCount > 0 && (
-              <span className="absolute -top-1.5 -right-2 bg-red-600 text-white text-[9px] font-black w-4 h-4 rounded-full flex items-center justify-center shadow-md animate-pulse">
+              <span className="absolute -top-1.5 -right-2 bg-red-600 text-white text-[9px] font-black w-4 h-4 rounded-full flex items-center justify-center shadow-md">
                 {cartCount}
               </span>
             )}

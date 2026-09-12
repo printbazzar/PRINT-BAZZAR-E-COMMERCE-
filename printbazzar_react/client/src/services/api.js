@@ -174,7 +174,23 @@ async function request(endpoint, options = {}, isRetry = false) {
     try {
       const res = await fetch(`${API_BASE_URL}${endpoint}`, finalConfig);
       clearTimeout(timeoutId);
-      const data = await res.json();
+
+      // Read the body as text first and parse defensively. Some failure paths
+      // (proxy/gateway timeouts, upstream crashes, 502/504s) return an empty or
+      // non-JSON body — calling res.json() directly on those throws a raw
+      // "Unexpected end of JSON input" TypeError that was leaking straight to
+      // the customer (e.g. on order submission). Falling back to {} lets the
+      // existing !res.ok / success-check logic below produce its normal,
+      // readable error message instead.
+      const rawText = await res.text();
+      let data = {};
+      if (rawText) {
+        try {
+          data = JSON.parse(rawText);
+        } catch (parseErr) {
+          data = {};
+        }
+      }
 
     // Transparent 401 session recovery via refresh token
     if (res.status === 401 && !isRetry) {
@@ -230,7 +246,7 @@ async function request(endpoint, options = {}, isRetry = false) {
     }
 
     if (!res.ok) {
-      throw new Error(data.message || 'API request failed');
+      throw new Error(data.message || `Request failed (HTTP ${res.status}). Please try again.`);
     }
 
     if (isGet && res.ok && !options.noCache) {

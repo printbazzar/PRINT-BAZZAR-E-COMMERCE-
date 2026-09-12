@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
 import { Breadcrumb, Button, Checkbox, Label, Modal, Select, Spinner, TextInput, Textarea } from 'flowbite-react';
 import {
@@ -13,7 +13,6 @@ import {
   HiOutlineSparkles,
   HiOutlineQuestionMarkCircle,
   HiOutlineColorSwatch,
-  HiStar,
   HiTrash,
   HiRefresh,
   HiOutlineClipboardList,
@@ -22,7 +21,7 @@ import {
 } from 'react-icons/hi';
 import { FaWhatsapp } from 'react-icons/fa';
 import { api } from '../services/api';
-import { calculateProductPrice, checkIsDoubleSide, evaluateCompatibilityRules } from '../utils/pricingEngine';
+import { checkIsDoubleSide, evaluateCompatibilityRules } from '../utils/pricingEngine';
 import { analyzeArtworkFile, getProductFileSpecifications } from '../utils/preflightAnalyzer';
 import { useCart } from '../context/CartContext';
 import { useBusinessInfo } from '../context/BusinessInfoContext';
@@ -133,8 +132,14 @@ export default function ProductDetail() {
   const [artworkVersion, setArtworkVersion] = useState(1);
   const [activeInfoTab, setActiveInfoTab] = useState(null);
   const [openConfigGroup, setOpenConfigGroup] = useState(null); // guided configuration flow: which group is expanded
+  const [hasConfigured, setHasConfigured] = useState(false); // UI-only: flips the top price label from "Starting Price" to "Your Price" once the customer changes quantity/options
+  const [showPriceBreakdown, setShowPriceBreakdown] = useState(false); // UI-only: keeps the detailed price breakdown available but visually secondary to the one primary price display
 
-  // Pricing state
+  // Pricing state — now populated exclusively from the server's authoritative
+  // api.calculatePrice() response (Phase 8C-5), so this is the SAME price the
+  // backend will actually charge at order creation, not a separate client-side
+  // estimate. The shape is unchanged (matches calculatePricing()'s return object
+  // field-for-field) so every existing pricing.* reference below still works.
   const [pricing, setPricing] = useState({
     basePrice: 0,
     productPrice: 0,
@@ -148,6 +153,17 @@ export default function ProductDetail() {
     totalTax: 0,
     grandTotal: 0,
   });
+  // priceLoading: a live request to the server pricing endpoint is in flight.
+  // priceError: the last request failed — the price shown above is stale; non-blocking warning shown.
+  // priceStale: true whenever `pricing` does NOT yet reflect a successful server response for the
+  //   CURRENT quantity/options/artwork/package/addons — i.e. right after any change, while loading,
+  //   or after a failure. Gates Add to Cart / Buy Now so a customer can never check out on a price
+  //   that isn't the one the server will actually charge.
+  const [priceLoading, setPriceLoading] = useState(false);
+  const [priceError, setPriceError] = useState(null);
+  const [priceStale, setPriceStale] = useState(true);
+  const priceRequestIdRef = useRef(0);
+  const priceDebounceRef = useRef(null);
 
   useEffect(() => {
     fetchProduct();
@@ -258,19 +274,71 @@ export default function ProductDetail() {
     }
   };
 
-  // Re-calculate price whenever options change
+  // Re-calculate price whenever options change — Phase 8C-5: this now calls the SAME
+  // server-side calculatePricing() engine that order creation uses (via api.calculatePrice),
+  // instead of the separate client-side pricingEngine.js copy, so the price shown here is
+  // guaranteed to match what the backend will actually charge.
+  //
+  // The moment any dependency changes, the currently-displayed `pricing` is marked stale
+  // (it belongs to the previous configuration). The actual network call is debounced ~350ms
+  // so rapid quantity/option changes only fire one request. A monotonically increasing
+  // requestId guards every response: if a newer request has since been fired, an older
+  // response is ignored outright, so a slow/late response can never overwrite a newer
+  // configuration's price. (Note: api.calculatePrice doesn't currently accept an AbortSignal,
+  // so this is a logical-cancellation guard rather than a network-level abort — the superseded
+  // request may still complete in the background, but its result is never applied.)
   useEffect(() => {
-    if (product) {
-      const result = calculateProductPrice({
-        product,
-        quantity,
-        selectedOptions,
-        artworkOption,
-        designPackage: artworkOption === 'DESIGN_SUPPORT' ? selectedPackage : null,
-        selectedAddons: artworkOption === 'DESIGN_SUPPORT' ? selectedAddons : [],
-      });
-      setPricing(result);
+    if (!product) return;
+
+    setPriceStale(true);
+
+    if (priceDebounceRef.current) {
+      clearTimeout(priceDebounceRef.current);
     }
+
+    const requestId = ++priceRequestIdRef.current;
+    setPriceLoading(true);
+
+    priceDebounceRef.current = setTimeout(async () => {
+      try {
+        const payload = {
+          productId: product.id,
+          quantity,
+          selectedOptions,
+          designOption: artworkOption === 'DESIGN_SUPPORT' ? 'Yes Please' : 'No Thank You',
+          artworkOption,
+          designPackage: artworkOption === 'DESIGN_SUPPORT' ? selectedPackage : null,
+          selectedAddons: artworkOption === 'DESIGN_SUPPORT' ? selectedAddons : [],
+        };
+
+        const res = await api.calculatePrice(payload);
+
+        // A newer request has since superseded this one — ignore this (now stale) response.
+        if (requestId !== priceRequestIdRef.current) return;
+
+        if (res && res.success && res.data) {
+          setPricing(res.data);
+          setPriceError(null);
+          setPriceStale(false);
+        } else {
+          setPriceError('Price may be outdated. Please refresh.');
+        }
+      } catch (err) {
+        if (requestId !== priceRequestIdRef.current) return;
+        console.error('Failed to fetch live price:', err);
+        setPriceError('Price may be outdated. Please refresh.');
+      } finally {
+        if (requestId === priceRequestIdRef.current) {
+          setPriceLoading(false);
+        }
+      }
+    }, 350);
+
+    return () => {
+      if (priceDebounceRef.current) {
+        clearTimeout(priceDebounceRef.current);
+      }
+    };
   }, [product, quantity, selectedOptions, artworkOption, selectedPackage, selectedAddons]);
 
   const handleOptionChange = (optionName, value) => {
@@ -278,6 +346,7 @@ export default function ProductDetail() {
       ...prev,
       [optionName]: value,
     }));
+    setHasConfigured(true);
   };
 
   // Dynamic compatibility evaluation
@@ -505,6 +574,19 @@ export default function ProductDetail() {
       return false;
     }
 
+    // 1b. Live Server Price Guard (Phase 8C-5) — never add to cart / checkout on a price that
+    // isn't confirmed by the server for the CURRENT quantity/options. This blocks submission
+    // while a price request is in flight, and if the last request for this exact configuration
+    // failed (priceError set), rather than silently falling back to any client-side estimate.
+    if (priceStale) {
+      alert(
+        priceError
+          ? `${priceError} Please wait a moment and try again.`
+          : 'Confirming your price with the server. Please wait a moment and try again.'
+      );
+      return false;
+    }
+
     // 2. MANDATORY ARTWORK SELECTION GUARD
     if (!artworkOption) {
       alert('Please select an Artwork Option:\n• Option 1: I Have My Print-Ready File\n• Option 2: I Need Design Support\nto continue.');
@@ -720,35 +802,54 @@ export default function ProductDetail() {
         {/* Right Column: Customizer & Options */}
         <div className="lg:col-span-7 bg-white p-6 sm:p-8 rounded-2xl border border-gray-200 shadow-xs">
           <div className="border-b pb-4">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-[11px] font-bold uppercase tracking-wider bg-gray-100 text-gray-700 px-2.5 py-1 rounded">
-                SKU: {product.sku}
-              </span>
-              <div className="flex items-center gap-1 text-yellow-400 text-xs font-bold">
-                <HiStar className="w-4 h-4" />
-                <span className="text-gray-800">4.8</span>
-                <span className="text-gray-400">(Verified Print Quality)</span>
-              </div>
-            </div>
+            <span className="text-[11px] font-bold uppercase tracking-wider bg-gray-100 text-gray-700 px-2.5 py-1 rounded">
+              SKU: {product.sku}
+            </span>
 
             <h1 className="text-2xl sm:text-3xl font-extrabold text-gray-900 mt-2">{product.name}</h1>
             <p className="text-gray-500 text-xs sm:text-sm mt-1.5 leading-relaxed">{product.shortDescription}</p>
 
-            {/* Live Price Tag with Per-Unit Savings Indicator */}
-            <div className="mt-3 flex flex-wrap items-baseline gap-3">
-              <span className="text-3xl sm:text-4xl font-black text-red-600">₹{pricing.subtotal}</span>
-              <div className="flex flex-col">
-                <span className="text-xs sm:text-sm text-gray-500 font-medium">
-                  {product.pricingType === 'PER_SQFT'
-                    ? `(₹${perUnitPrice} / Sq.ft for ${quantity} Sq.ft)`
-                    : `(₹${perUnitPrice} / ${product.quantityUnit?.replace(/s$/, '') || 'piece'} for ${quantity} ${product.quantityUnit || 'pcs'})`}
+            {/* Single Primary Price Display — label switches from "Starting Price" to
+                "Your Price" once the customer changes quantity/options. pricing.subtotal now
+                comes from the live server pricing endpoint (Phase 8C-5); on the very first
+                load (no successful response yet) we show a neutral placeholder instead of
+                ₹0, and afterwards the last successful price stays visible with a small
+                "Updating price..." indicator rather than ever blanking or zeroing out. */}
+            <div className="mt-3">
+              <span className="text-[10px] font-black uppercase tracking-wider text-gray-400 block">
+                {hasConfigured ? 'Your Price' : 'Starting Price'}
+              </span>
+              {pricing.subtotal === 0 && priceLoading ? (
+                <div className="flex items-baseline gap-2 mt-0.5">
+                  <span className="text-lg sm:text-xl font-bold text-gray-400">Calculating price…</span>
+                </div>
+              ) : (
+                <div className="flex flex-wrap items-baseline gap-3 mt-0.5">
+                  <span className="text-3xl sm:text-4xl font-black text-red-600">₹{pricing.subtotal}</span>
+                  <div className="flex flex-col">
+                    <span className="text-xs sm:text-sm text-gray-500 font-medium">
+                      {product.pricingType === 'PER_SQFT'
+                        ? `(₹${perUnitPrice} / Sq.ft for ${quantity} Sq.ft)`
+                        : `(₹${perUnitPrice} / ${product.quantityUnit?.replace(/s$/, '') || 'piece'} for ${quantity} ${product.quantityUnit || 'pcs'})`}
+                    </span>
+                    {quantity >= 500 && (
+                      <span className="text-[10px] font-extrabold text-green-700 flex items-center gap-1">
+                        ⚡ Bulk discount active (Price per unit drops for higher quantities)
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+              {priceLoading && !(pricing.subtotal === 0) && (
+                <span className="text-[11px] text-gray-400 font-semibold flex items-center gap-1 mt-1">
+                  <Spinner size="xs" /> Updating price…
                 </span>
-                {quantity >= 500 && (
-                  <span className="text-[10px] font-extrabold text-green-700 flex items-center gap-1">
-                    ⚡ Bulk discount active (Price per unit drops for higher quantities)
-                  </span>
-                )}
-              </div>
+              )}
+              {!priceLoading && priceError && (
+                <span className="text-[11px] text-amber-600 font-bold mt-1 block">
+                  ⚠️ {priceError}
+                </span>
+              )}
             </div>
           </div>
 
@@ -757,7 +858,7 @@ export default function ProductDetail() {
             <DynamicQuantityTierPricing
               product={product}
               quantity={quantity}
-              onQuantityChange={(newQty) => setQuantity(newQty)}
+              onQuantityChange={(newQty) => { setQuantity(newQty); setHasConfigured(true); }}
               selectedOptions={selectedOptions}
               artworkOption={artworkOption}
               selectedPackage={selectedPackage}
@@ -775,20 +876,23 @@ export default function ProductDetail() {
             const isOpen = openConfigGroup === groupKey || (openConfigGroup === null && groupIdx === 0);
             const stepNum = groupIdx + 2;
 
-            const chosenPreview = configGroups.groups[groupKey]
-              .map(({ item }) => {
-                const optName = configGroups.hasDynamic ? (item.customLabel || item.master?.name) : item.optionName;
-                return selectedOptions[optName];
-              })
+            const optionNamesInGroup = configGroups.groups[groupKey].map(({ item }) =>
+              configGroups.hasDynamic ? (item.customLabel || item.master?.name) : item.optionName
+            );
+            const chosenPreview = optionNamesInGroup
+              .map((optName) => selectedOptions[optName])
               .filter(Boolean)
               .join(', ');
+            // Visually surface step completion using the already-computed missingRequiredOptions —
+            // no new validation rules, just a status indicator on the existing accordion header.
+            const isGroupMissingRequired = optionNamesInGroup.some((n) => missingRequiredOptions.includes(n));
 
             return (
               <div key={groupKey} className="mt-6 pt-4 border-t">
                 <button
                   type="button"
                   onClick={() => setOpenConfigGroup(isOpen ? null : groupKey)}
-                  className="w-full flex items-center justify-between gap-2 text-left"
+                  className="w-full flex items-center justify-between gap-2 text-left py-2.5 min-h-[44px]"
                 >
                   <span className="flex items-center gap-2 font-extrabold text-xs uppercase tracking-wider text-gray-800">
                     <Icon className="w-4 h-4 text-yellow-500 flex-shrink-0" />
@@ -798,6 +902,11 @@ export default function ProductDetail() {
                     {!isOpen && chosenPreview && (
                       <span className="text-[11px] text-gray-500 font-semibold truncate max-w-[140px]">{chosenPreview}</span>
                     )}
+                    {chosenPreview ? (
+                      <HiCheckCircle className="w-4 h-4 text-green-600 flex-shrink-0" />
+                    ) : isGroupMissingRequired ? (
+                      <span className="text-[10px] font-black text-amber-600 uppercase tracking-wide flex-shrink-0">Required</span>
+                    ) : null}
                     {isOpen ? <HiChevronUp className="w-4 h-4 text-gray-400 flex-shrink-0" /> : <HiChevronDown className="w-4 h-4 text-gray-400 flex-shrink-0" />}
                   </span>
                 </button>
@@ -847,28 +956,100 @@ export default function ProductDetail() {
                             }))
                         : (item.values || []);
 
+                      // Rule 1: zero enabled/available values — do not render this option at all.
+                      if (valuesList.length === 0) {
+                        return null;
+                      }
+
+                      const optionHeader = (
+                        <div className={isAddon ? 'flex justify-between items-center mb-2' : 'flex items-center gap-1.5'}>
+                          <span className={isAddon ? 'block font-bold text-xs text-purple-950' : 'font-bold text-xs text-gray-700'}>
+                            {getFriendlyOptionLabel(optName)}
+                          </span>
+                          {!isAddon && isRequired && <span className="text-red-500 text-xs font-black">*</span>}
+                          {selectedOptions[optName] && (
+                            <span
+                              className={
+                                isAddon
+                                  ? 'text-[10px] text-purple-700 font-extrabold bg-purple-100 px-2 py-0.5 rounded-full'
+                                  : 'text-[11px] text-purple-700 font-bold ml-auto'
+                              }
+                            >
+                              {isAddon ? 'Applied' : 'Selected'}: {selectedOptions[optName]}
+                            </span>
+                          )}
+                        </div>
+                      );
+
+                      // Rule 2: exactly one available value — show as fixed/preselected info, not a
+                      // clickable button. selectedOptions[optName] is already populated with this
+                      // value by the existing default-selection logic in fetchProduct(), so pricing
+                      // keeps receiving the same selected value; nothing is invented here.
+                      if (valuesList.length === 1) {
+                        const onlyValue = valuesList[0];
+                        return (
+                          <div
+                            key={item.id || optName}
+                            className={isAddon ? 'bg-purple-50/40 p-3.5 rounded-2xl border border-purple-100' : 'space-y-1.5'}
+                          >
+                            {optionHeader}
+                            <div className="p-2.5 rounded-xl border border-gray-200 bg-gray-50 text-left">
+                              <span className="text-xs block leading-tight text-gray-800 font-semibold">{onlyValue.valueLabel}</span>
+                              {onlyValue.priceModifierValue > 0 && (
+                                <span className={`text-[10px] font-bold block mt-0.5 ${isAddon ? 'text-purple-700 font-black' : 'text-red-600'}`}>
+                                  +{onlyValue.priceModifierType === 'PERCENT' ? `${onlyValue.priceModifierValue}%` : `₹${onlyValue.priceModifierValue}`}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      // Rule 3b: 5+ available values — compact dropdown instead of a large button grid.
+                      // Reuses selectedOptions / handleOptionChange / isOptionValueAvailable exactly as
+                      // the button UI below does; option/value labels and price modifiers are unchanged.
+                      if (valuesList.length >= 5) {
+                        return (
+                          <div
+                            key={item.id || optName}
+                            className={isAddon ? 'bg-purple-50/40 p-3.5 rounded-2xl border border-purple-100' : 'space-y-1.5'}
+                          >
+                            {optionHeader}
+                            <Select
+                              value={selectedOptions[optName] || ''}
+                              onChange={(e) => handleOptionChange(optName, e.target.value)}
+                            >
+                              {!selectedOptions[optName] && (
+                                <option value="" disabled>
+                                  Select {getFriendlyOptionLabel(optName)}
+                                </option>
+                              )}
+                              {valuesList.map((v) => {
+                                const isAvailable = isOptionValueAvailable(optName, v.valueLabel, optCode);
+                                const modifierText =
+                                  v.priceModifierValue > 0
+                                    ? ` (+${v.priceModifierType === 'PERCENT' ? `${v.priceModifierValue}%` : `₹${v.priceModifierValue}`})`
+                                    : '';
+                                return (
+                                  <option key={v.id || v.valueLabel} value={v.valueLabel} disabled={!isAvailable}>
+                                    {v.valueLabel}
+                                    {modifierText}
+                                    {!isAvailable ? ' — Incompatible' : ''}
+                                  </option>
+                                );
+                              })}
+                            </Select>
+                          </div>
+                        );
+                      }
+
+                      // Rule 3a: 2-4 available values — existing button/segmented-button UI, unchanged.
                       return (
                         <div
                           key={item.id || optName}
                           className={isAddon ? 'bg-purple-50/40 p-3.5 rounded-2xl border border-purple-100' : 'space-y-1.5'}
                         >
-                          <div className={isAddon ? 'flex justify-between items-center mb-2' : 'flex items-center gap-1.5'}>
-                            <span className={isAddon ? 'block font-bold text-xs text-purple-950' : 'font-bold text-xs text-gray-700'}>
-                              {getFriendlyOptionLabel(optName)}
-                            </span>
-                            {!isAddon && isRequired && <span className="text-red-500 text-xs font-black">*</span>}
-                            {selectedOptions[optName] && (
-                              <span
-                                className={
-                                  isAddon
-                                    ? 'text-[10px] text-purple-700 font-extrabold bg-purple-100 px-2 py-0.5 rounded-full'
-                                    : 'text-[11px] text-purple-700 font-bold ml-auto'
-                                }
-                              >
-                                {isAddon ? 'Applied' : 'Selected'}: {selectedOptions[optName]}
-                              </span>
-                            )}
-                          </div>
+                          {optionHeader}
 
                           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                             {valuesList.map((v) => {
@@ -936,6 +1117,7 @@ export default function ProductDetail() {
                   <HiOutlineClipboardList className="w-5 h-5 text-purple-600" />
                   {configGroups.groupOrder.length + 2}. Design & Artwork
                 </h3>
+                <p className="text-[11px] text-gray-500 font-semibold mt-0.5">Continue to Design / Upload ➔</p>
               </div>
               <span className="text-xs text-gray-500 font-semibold">
                 Select an option before adding to cart
@@ -1049,7 +1231,7 @@ export default function ProductDetail() {
                         <h4 className="font-black text-xs sm:text-base text-blue-950">
                           Pre-Upload File Checklist & Specifications
                         </h4>
-                        <span className="text-[10px] text-blue-700 font-semibold block sm:hidden">
+                        <span className="text-[10px] text-blue-700 font-semibold block">
                           {fileSpecs?.dimensionsText} • Bleed {fileSpecs?.bleedText} • {fileSpecs?.resolutionText}
                         </span>
                       </div>
@@ -1060,15 +1242,16 @@ export default function ProductDetail() {
                       </span>
                       <button
                         type="button"
-                        className="sm:hidden text-xs font-black text-blue-800 bg-blue-100 px-2.5 py-1 rounded-lg"
+                        className="text-xs font-black text-blue-800 bg-blue-100 px-2.5 py-1 rounded-lg"
                       >
                         {showPreUploadSpecs ? 'Hide ▲' : 'View Specs ▼'}
                       </button>
                     </div>
                   </div>
 
-                  {/* 5-Key Specifications Grid - Always visible on desktop, toggleable on mobile */}
-                  <div className={`${showPreUploadSpecs ? 'block' : 'hidden sm:block'} space-y-3 pt-1`}>
+                  {/* 5-Key Specifications Grid - collapsed by default on every screen size so the
+                      upload dropzone (the primary action) isn't buried under technical detail. */}
+                  <div className={`${showPreUploadSpecs ? 'block' : 'hidden'} space-y-3 pt-1`}>
                     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5">
                       <div className="bg-white/95 p-3 rounded-xl border border-blue-100 shadow-2xs">
                         <span className="text-[10px] text-gray-500 uppercase font-extrabold block">Card / Trim Size</span>
@@ -1228,6 +1411,25 @@ export default function ProductDetail() {
                     disclaimerAccepted={disclaimerAccepted}
                     onToggleDisclaimer={() => setDisclaimerAccepted(!disclaimerAccepted)}
                   />
+                )}
+
+                {/* Clear next-step nudge once a file is uploaded and not blocked — reuses the
+                    existing Add to Cart/Buy Now CTAs; no new cart logic. On mobile the desktop
+                    CTA row is hidden (Phase 6), so this scrolls to whichever CTA is actually
+                    visible instead of pointing at a hidden target. */}
+                {(uploadedArtwork || artworkFile) && preflightReport?.status !== 'BLOCK' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const desktopCta = document.getElementById('cart-cta-section');
+                      const target = desktopCta && desktopCta.offsetParent !== null ? desktopCta : document.getElementById('mobile-cta-bar');
+                      target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }}
+                    className="w-full flex items-center justify-between gap-2 bg-green-50 border border-green-200 text-green-900 rounded-xl px-4 py-2.5 text-xs font-bold min-h-[44px]"
+                  >
+                    <span>Design Ready ✓</span>
+                    <span className="underline">Continue to Cart ↓</span>
+                  </button>
                 )}
               </div>
             )}
@@ -1789,63 +1991,76 @@ export default function ProductDetail() {
             </div>
           )}
 
-          {/* Dynamic Price Calculation Summary Box */}
-          <div className="bg-gray-50 border border-gray-200 rounded-2xl p-4 mt-6">
-            <div className="flex justify-between items-baseline mb-2">
-              <span className="text-xs font-bold uppercase tracking-wider text-gray-700">Order Subtotal:</span>
-              <span className={`text-3xl font-black ${pricing.isAvailable !== false ? 'text-red-600' : 'text-gray-400'}`}>
-                ₹{pricing.subtotal}
-              </span>
-            </div>
-            <div className="text-xs text-gray-500 space-y-1.5 border-t pt-2.5">
-              <div className="flex justify-between font-medium">
-                <span>
-                  Base Print Cost ({pricing.quantity} {product.quantityUnit || 'pcs'}):
-                </span>
-                <span className="text-gray-900 font-bold">₹{pricing.basePrice}</span>
-              </div>
+          {/* Price Breakdown — kept available but visually secondary to the one primary
+              price display shown at the top of the page (same pricing.subtotal value,
+              not restated large here to avoid competing price blocks). */}
+          <div className="border border-gray-200 rounded-2xl p-3.5 mt-6">
+            <button
+              type="button"
+              onClick={() => setShowPriceBreakdown(!showPriceBreakdown)}
+              className="w-full flex items-center justify-between gap-2 text-xs font-bold text-gray-600"
+            >
+              <span>View Price Breakdown (incl. GST)</span>
+              <span className="text-gray-400">{showPriceBreakdown ? 'Hide ▲' : 'View ▼'}</span>
+            </button>
 
-              {/* Applied Add-ons and Modifiers */}
-              {pricing.appliedAddons && pricing.appliedAddons.length > 0 && (
-                <div className="space-y-1 py-1 border-y border-dashed border-gray-200 my-1">
-                  {pricing.appliedAddons.map((addon, idx) => (
-                    <div key={idx} className="flex justify-between text-purple-900 text-[11px]">
-                      <span className="flex items-center gap-1 font-medium">
-                        <span className="text-purple-600">✦</span> {addon.optionName}: {addon.valueLabel}
-                      </span>
-                      <span className="font-bold">+₹{addon.amount}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* Fallback appliedModifiers for volume slab products */}
-              {!pricing.appliedAddons?.length && pricing.appliedModifiers && pricing.appliedModifiers.length > 0 && (
-                <div className="space-y-1 py-1 border-y border-dashed border-gray-200 my-1">
-                  {pricing.appliedModifiers.map((mod, idx) => (
-                    <div key={idx} className="flex justify-between text-yellow-800 text-[11px]">
-                      <span className="flex items-center gap-1 font-medium">
-                        <span className="text-yellow-600">✦</span> {mod.valueLabel}:
-                      </span>
-                      <span className="font-bold">+₹{mod.amount}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {pricing.designFee > 0 && (
-                <div className="flex justify-between text-purple-700 font-semibold">
+            {showPriceBreakdown && (
+              <div className="text-xs text-gray-500 space-y-1.5 border-t pt-2.5 mt-2.5">
+                <div className="flex justify-between font-medium">
                   <span>
-                    🎨 Design Support ({pricing.designPackageName || (selectedPackage ? selectedPackage.packageName : 'Package')}):
+                    Base Print Cost ({pricing.quantity} {product.quantityUnit || 'pcs'}):
                   </span>
-                  <span className="font-bold">+₹{pricing.designFee}</span>
+                  <span className="text-gray-900 font-bold">₹{pricing.basePrice}</span>
                 </div>
-              )}
-              <div className="flex justify-between font-semibold text-gray-700 pt-1">
-                <span>GST (18% included in checkout):</span>
-                <span>₹{pricing.totalTax}</span>
+
+                {/* Applied Add-ons and Modifiers */}
+                {pricing.appliedAddons && pricing.appliedAddons.length > 0 && (
+                  <div className="space-y-1 py-1 border-y border-dashed border-gray-200 my-1">
+                    {pricing.appliedAddons.map((addon, idx) => (
+                      <div key={idx} className="flex justify-between text-purple-900 text-[11px]">
+                        <span className="flex items-center gap-1 font-medium">
+                          <span className="text-purple-600">✦</span> {addon.optionName}: {addon.valueLabel}
+                        </span>
+                        <span className="font-bold">+₹{addon.amount}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Fallback appliedModifiers for volume slab products */}
+                {!pricing.appliedAddons?.length && pricing.appliedModifiers && pricing.appliedModifiers.length > 0 && (
+                  <div className="space-y-1 py-1 border-y border-dashed border-gray-200 my-1">
+                    {pricing.appliedModifiers.map((mod, idx) => (
+                      <div key={idx} className="flex justify-between text-yellow-800 text-[11px]">
+                        <span className="flex items-center gap-1 font-medium">
+                          <span className="text-yellow-600">✦</span> {mod.valueLabel}:
+                        </span>
+                        <span className="font-bold">+₹{mod.amount}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {pricing.designFee > 0 && (
+                  <div className="flex justify-between text-purple-700 font-semibold">
+                    <span>
+                      🎨 Design Support ({pricing.designPackageName || (selectedPackage ? selectedPackage.packageName : 'Package')}):
+                    </span>
+                    <span className="font-bold">+₹{pricing.designFee}</span>
+                  </div>
+                )}
+                <div className="flex justify-between font-semibold text-gray-700 pt-1">
+                  <span>GST (18% included in checkout):</span>
+                  <span>₹{pricing.totalTax}</span>
+                </div>
+                <div className="flex justify-between font-black text-gray-900 pt-1.5 border-t border-gray-100">
+                  <span>Order Subtotal:</span>
+                  <span className={pricing.isAvailable !== false ? 'text-red-600' : 'text-gray-400'}>
+                    ₹{pricing.subtotal}
+                  </span>
+                </div>
               </div>
-            </div>
+            )}
           </div>
 
           {/* Your Selection Summary Card */}
@@ -1911,18 +2126,30 @@ export default function ProductDetail() {
             </Label>
           </div>
 
-          {/* Action CTA Buttons */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-4">
+          {/* Compact price reminder next to the desktop purchase buttons (mobile already has this
+              next to its sticky CTA) — small, not another large competing price block. */}
+          <div className="hidden lg:flex items-baseline justify-between pt-4">
+            <span className="text-xs font-bold text-gray-500 uppercase tracking-wide">
+              {hasConfigured ? 'Your Price' : 'Starting Price'}
+            </span>
+            <span className="text-xl font-black text-red-600">₹{pricing.subtotal}</span>
+          </div>
+
+          {/* Action CTA Buttons — desktop/tablet only; below lg the sticky mobile bar already
+              provides these same two actions, so this avoids a duplicate CTA on mobile. Buy Now
+              is the stronger, filled primary action; Add to Cart is the lighter secondary. */}
+          <div id="cart-cta-section" className="hidden lg:grid lg:grid-cols-2 gap-3 pt-2">
             <Button
-              color="dark"
+              color="light"
               disabled={
                 !agreeTerms ||
                 pricing.isAvailable === false ||
+                priceStale ||
                 missingRequiredOptions.length > 0 ||
                 !compatibilityResult.isCompatible
               }
               onClick={handleAddToCart}
-              className="bg-black hover:bg-gray-800 disabled:bg-gray-300 text-white font-extrabold py-1.5 rounded-xl text-sm"
+              className="bg-white border-2 border-black hover:bg-gray-50 disabled:border-gray-300 disabled:text-gray-400 text-black font-extrabold py-1.5 rounded-xl text-sm"
             >
               Add To Cart
             </Button>
@@ -1930,6 +2157,7 @@ export default function ProductDetail() {
               disabled={
                 !agreeTerms ||
                 pricing.isAvailable === false ||
+                priceStale ||
                 missingRequiredOptions.length > 0 ||
                 !compatibilityResult.isCompatible
               }
@@ -1975,6 +2203,7 @@ export default function ProductDetail() {
 
       {/* Sticky Mobile Bottom Buy Bar (Positioned above MobileBottomNav) */}
       <div
+        id="mobile-cta-bar"
         className="lg:hidden fixed bottom-13.5 sm:bottom-14 left-0 right-0 bg-white/98 backdrop-blur-md border-t border-gray-200 px-3 py-2 z-35 shadow-2xl flex items-center justify-between gap-3"
       >
         <div className="flex-1 min-w-0">
@@ -1988,16 +2217,16 @@ export default function ProductDetail() {
         <div className="flex items-center gap-2">
           <Button
             size="xs"
-            color="dark"
+            color="light"
             onClick={handleAddToCart}
-            className="bg-black hover:bg-gray-800 text-white font-extrabold text-xs px-3 py-2 rounded-xl min-h-[44px]"
+            className="bg-white border-2 border-black hover:bg-gray-50 text-black font-extrabold text-xs px-3 py-2 rounded-xl min-h-[44px]"
           >
             Add to Cart
           </Button>
           <Button
             size="xs"
             onClick={handleBuyNow}
-            className="bg-yellow-400 hover:bg-yellow-500 text-black font-black text-xs px-3.5 py-2 rounded-xl shadow-sm min-h-[44px]"
+            className="bg-yellow-400 hover:bg-yellow-500 text-black font-black text-xs px-3.5 py-2 rounded-xl shadow-md min-h-[44px]"
           >
             Buy Now ➔
           </Button>

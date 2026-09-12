@@ -1,4 +1,4 @@
-import { test, describe, before, after } from 'node:test';
+import { test, describe, before, after, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { PrismaClient } from '@prisma/client';
@@ -8,8 +8,30 @@ process.env.NODE_ENV = 'test';
 
 // Import express app
 const { default: app } = await import('../src/server.js');
+// The one clean verification boundary the production Google login endpoint
+// calls out to: googleOAuthClient.verifyIdToken(). We stub only this method
+// below (see before()) so the test can exercise the REAL production request
+// contract — POST { credential } — and the REAL production code path
+// (payload shape check, email_verified check, customer lookup/create,
+// session creation, JWT issuance, HttpOnly cookie) without needing a live,
+// cryptographically real Google-signed token, which an automated test
+// cannot obtain. Nothing about production auth logic changes; the mock is
+// local to this test process only.
+const { googleOAuthClient } = await import('../src/controllers/customerAuthController.js');
 
 const prisma = new PrismaClient();
+
+/**
+ * Builds a fake "credential" the exact way the real POST /api/v1/customer/auth/google
+ * contract expects it: a single opaque string field. In production this is a
+ * genuine Google-signed JWT ID token; in this test it's a base64-encoded JSON
+ * profile that only the mocked verifyIdToken() below knows how to decode —
+ * standing in for "Google cryptographically verified this token and it
+ * decodes to this payload".
+ */
+function makeFakeGoogleCredential(profile) {
+  return Buffer.from(JSON.stringify(profile), 'utf8').toString('base64');
+}
 
 describe('Print Bazzar: Google Login & Direct Checkout Automated Tests', () => {
   let server;
@@ -35,9 +57,29 @@ describe('Print Bazzar: Google Login & Direct Checkout Automated Tests', () => {
       where: { status: 'ACTIVE' },
     });
     assert.ok(activeProduct, 'An active product must exist in database to run order tests');
+
+    // 3. Stub ONLY the network-bound Google verification call (see comment
+    // above makeFakeGoogleCredential). Everything downstream of this call in
+    // customerGoogleLogin() — email_verified check, customer lookup/create,
+    // session/JWT/cookie issuance — runs as real production code.
+    mock.method(googleOAuthClient, 'verifyIdToken', async ({ idToken }) => {
+      const fakeProfile = JSON.parse(Buffer.from(idToken, 'base64').toString('utf8'));
+      return {
+        getPayload: () => ({
+          email: fakeProfile.email,
+          email_verified: true,
+          name: fakeProfile.name,
+          given_name: fakeProfile.name,
+          sub: fakeProfile.googleId,
+          picture: fakeProfile.avatarUrl || null,
+        }),
+      };
+    });
   });
 
   after(async () => {
+    mock.restoreAll();
+
     // Cleanup created test records
     console.log('\n🧹 Cleaning up test database records...');
     try {
@@ -80,19 +122,31 @@ describe('Print Bazzar: Google Login & Direct Checkout Automated Tests', () => {
     const testGoogleId = `google_sub_${Date.now()}`;
     const testName = 'Google Automated Tester';
 
+    // Real production contract: POST { credential }. The credential here is
+    // a fake token only the mocked verifyIdToken() (installed in before())
+    // can decode — see makeFakeGoogleCredential(). The endpoint itself does
+    // not know or care that it's fake; it goes through the exact same
+    // verifyIdToken() call, email_verified check, and downstream logic a
+    // real browser login would.
+    const credential = makeFakeGoogleCredential({
+      email: testEmail,
+      name: testName,
+      googleId: testGoogleId,
+      avatarUrl: 'https://example.com/avatar.jpg',
+    });
+
     const res = await fetch(`${baseUrl}/api/v1/customer/auth/google`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        email: testEmail,
-        name: testName,
-        googleId: testGoogleId,
-        avatarUrl: 'https://example.com/avatar.jpg',
-      }),
+      body: JSON.stringify({ credential }),
     });
 
-    assert.equal(res.status, 200, `Expected 200 OK, got ${res.status}`);
     const data = await res.json();
+    assert.equal(
+      res.status,
+      200,
+      `Expected 200 OK, got ${res.status}. Response body: ${JSON.stringify(data)}`
+    );
 
     assert.equal(data.success, true, 'Response must indicate success');
     assert.ok(data.token, 'Must return JWT token for authenticated session');
@@ -180,22 +234,30 @@ describe('Print Bazzar: Google Login & Direct Checkout Automated Tests', () => {
   });
 
   test('3. Authenticated Checkout: Google user places order with auto-associated customer profile', async () => {
-    // First, login with Google
+    // First, login with Google via the REAL production contract — same
+    // approach as Test 1: a fake credential the mocked verifyIdToken()
+    // decodes, exercising the real endpoint and its real downstream logic.
     const googleEmail = `google.buyer.${Date.now()}@example.com`;
     const googleId = `gid_buyer_${Date.now()}`;
     const googleName = 'Google Verified Buyer';
 
+    const loginCredential = makeFakeGoogleCredential({
+      email: googleEmail,
+      name: googleName,
+      googleId,
+    });
+
     const loginRes = await fetch(`${baseUrl}/api/v1/customer/auth/google`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        email: googleEmail,
-        name: googleName,
-        googleId,
-      }),
+      body: JSON.stringify({ credential: loginCredential }),
     });
     const loginData = await loginRes.json();
-    assert.equal(loginRes.status, 200);
+    assert.equal(
+      loginRes.status,
+      200,
+      `Google login (setup for Test 3) expected 200 OK, got ${loginRes.status}. Response body: ${JSON.stringify(loginData)}`
+    );
     createdCustomerIds.add(loginData.customer.id);
 
     // Place order using customer token

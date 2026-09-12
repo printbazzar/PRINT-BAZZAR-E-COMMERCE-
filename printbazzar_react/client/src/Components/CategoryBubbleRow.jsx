@@ -69,7 +69,7 @@ export default function CategoryBubbleRow() {
                 priority={idx < 6}
                 width={200}
                 height={150}
-                containerClassName="w-full aspect-[4/3] rounded-2xl bg-[#f8f9fa] border border-gray-200/80 group-hover:border-yellow-400 group-hover:shadow-md transition-all duration-200"
+                containerClassName="w-full aspect-[4/3] rounded-2xl bg-[#f8f9fa] group-hover:shadow-md transition-all duration-200"
                 className="w-full h-full object-contain p-3 sm:p-4 transition-transform duration-200 group-hover:scale-[1.04]"
               />
 

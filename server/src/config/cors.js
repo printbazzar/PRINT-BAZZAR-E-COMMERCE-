@@ -8,6 +8,7 @@ const DEFAULT_ALLOWED_ORIGINS = [
   'https://printbazzar.online',
   'http://localhost:5173',
   'http://127.0.0.1:5173',
+  'http://localhost:5174', // Vite dev server fallback port (auto-increments when 5173 is in use)
   'http://localhost:3000',
   'http://127.0.0.1:3000',
   'http://localhost:5000',
@@ -39,6 +40,11 @@ export const isOriginAllowed = (origin) => {
   if (process.env.NODE_ENV !== 'production') {
     const isLocalNetwork = /^http:\/\/(192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3})(:\d+)?$/.test(origin);
     if (isLocalNetwork) return true;
+
+    // Allow any localhost/127.0.0.1 port in development, since Vite auto-increments
+    // its port (5173 -> 5174 -> 5175...) whenever the default port is already in use.
+    const isLocalhostAnyPort = /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin);
+    if (isLocalhostAnyPort) return true;
   }
 
   return false;

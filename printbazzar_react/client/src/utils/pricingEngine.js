@@ -278,7 +278,13 @@ export function calculatePricing({
   // Used if no combination matrix was matched or defined
   // =========================================================================
   let matchedSlab = null;
-  if (!basePrice && (pricingMethod !== 'MATRIX' && pricingMethod !== 'COMBINATION' || matrices.length === 0)) {
+  // Fixed (Phase 8C-3): fall back to slab pricing whenever the product is still available and no
+  // basePrice was set, matching the server engine's guard exactly. The previous condition blocked
+  // this fallback for any product with a pricing matrix (matrices.length > 0) whenever an exact
+  // matrix match wasn't found, even though the product was never marked unavailable — causing the
+  // client to display Rs.0 for valid non-matrix quantities (e.g. Textured Card / Economical Card
+  // at qty 99, 175, 1500) while the server correctly fell back to ProductPriceSlab.
+  if (!basePrice && isAvailable) {
     const hasSlabs = product.priceSlabs && product.priceSlabs.length > 0;
 
     if (hasSlabs) {

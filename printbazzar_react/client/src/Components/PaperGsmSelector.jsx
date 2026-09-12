@@ -113,85 +113,48 @@ export default function PaperGsmSelector({
   // If product has explicit value mappings from DB for GSM/Paper Stock
   const mappedValues = optionConfig?.valueMappings?.filter((vm) => vm.isEnabled !== false) || [];
 
-  // Determine list of GSM items to display
-  let gsmItems = [];
-
-  if (mappedValues.length > 0) {
-    // Build from DB mapped values with rich metadata enrichment
-    gsmItems = mappedValues.map((vm) => {
-      const label = vm.customLabel || vm.masterValue?.label || '';
-      const gsmKey = extractGsmKey(label) || extractGsmKey(vm.masterValue?.code);
-      const meta = (gsmKey && GSM_CATALOG[gsmKey]) || {
-        weightNum: parseInt(gsmKey, 10) || 150,
-        shortBadge: gsmKey ? `${gsmKey} GSM` : label,
-        displayName: label,
-        categoryName: 'Commercial Paper Stock',
-        feel: 'Standard commercial printing stock',
-        bars: 3,
-        idealFor: 'Commercial Printing & Marketing Collateral',
-        tag: null,
-        defaultModifierText: vm.priceModifierValue > 0
-          ? `+₹${vm.priceModifierValue}`
-          : 'Standard',
-      };
-
-      const modifierText = vm.priceModifierValue > 0
-        ? `+${vm.priceModifierType === 'PERCENT' ? `${vm.priceModifierValue}%` : `₹${vm.priceModifierValue}`}`
-        : meta.defaultModifierText;
-
-      return {
-        id: vm.id,
-        valueLabel: label,
-        gsmKey,
-        shortBadge: meta.shortBadge,
-        displayName: label,
-        categoryName: meta.categoryName,
-        feel: meta.feel,
-        bars: meta.bars,
-        idealFor: meta.idealFor,
-        tag: meta.tag,
-        modifierText,
-      };
-    });
-  } else {
-    // Standard Canonical Industry Presets (80 GSM, 130 GSM, 170 GSM, 250 GSM, 300 GSM, 350 GSM)
-    // Filter appropriate defaults based on product category / name
-    const prodName = (product?.name || '').toLowerCase();
-    const isStationery = prodName.includes('letterhead') || prodName.includes('bill') || prodName.includes('form') || prodName.includes('book');
-    const isFlyer = prodName.includes('flyer') || prodName.includes('brochure') || prodName.includes('leaflet') || prodName.includes('pamphlet');
-    const isCard = prodName.includes('card') || prodName.includes('visiting') || prodName.includes('tag') || prodName.includes('badge') || prodName.includes('invite');
-
-    let keys = ['80', '130', '170', '250', '300'];
-    if (isStationery) {
-      keys = ['80', '100', '130'];
-    } else if (isFlyer) {
-      keys = ['130', '170', '250', '300'];
-    } else if (isCard) {
-      keys = ['250', '300', '350', '400'];
-    }
-
-    // Ensure 80, 130, 300 are always accessible if general
-    if (!isStationery && !isCard && !isFlyer) {
-      keys = ['80', '130', '170', '250', '300', '350'];
-    }
-
-    gsmItems = keys.map((k) => {
-      const meta = GSM_CATALOG[k];
-      return {
-        id: `gsm-preset-${k}`,
-        valueLabel: `${meta.shortBadge} (${meta.categoryName})`,
-        gsmKey: k,
-        shortBadge: meta.shortBadge,
-        displayName: meta.shortBadge,
-        categoryName: meta.categoryName,
-        feel: meta.feel,
-        bars: meta.bars,
-        idealFor: meta.idealFor,
-        tag: meta.tag,
-        modifierText: meta.defaultModifierText,
-      };
-    });
+  // No real DB-backed GSM/Paper Stock mapping exists for this product — render nothing rather
+  // than inventing GSM options or price modifiers the server pricing system doesn't know about.
+  if (mappedValues.length === 0) {
+    return null;
   }
+
+  // Build from DB mapped values with rich metadata enrichment
+  const gsmItems = mappedValues.map((vm) => {
+    const label = vm.customLabel || vm.masterValue?.label || '';
+    const gsmKey = extractGsmKey(label) || extractGsmKey(vm.masterValue?.code);
+    const meta = (gsmKey && GSM_CATALOG[gsmKey]) || {
+      weightNum: parseInt(gsmKey, 10) || 150,
+      shortBadge: gsmKey ? `${gsmKey} GSM` : label,
+      displayName: label,
+      categoryName: 'Commercial Paper Stock',
+      feel: 'Standard commercial printing stock',
+      bars: 3,
+      idealFor: 'Commercial Printing & Marketing Collateral',
+      tag: null,
+      defaultModifierText: vm.priceModifierValue > 0
+        ? `+₹${vm.priceModifierValue}`
+        : 'Standard',
+    };
+
+    const modifierText = vm.priceModifierValue > 0
+      ? `+${vm.priceModifierType === 'PERCENT' ? `${vm.priceModifierValue}%` : `₹${vm.priceModifierValue}`}`
+      : meta.defaultModifierText;
+
+    return {
+      id: vm.id,
+      valueLabel: label,
+      gsmKey,
+      shortBadge: meta.shortBadge,
+      displayName: label,
+      categoryName: meta.categoryName,
+      feel: meta.feel,
+      bars: meta.bars,
+      idealFor: meta.idealFor,
+      tag: meta.tag,
+      modifierText,
+    };
+  });
 
   // Find currently active item
   const activeItem = gsmItems.find((item) => {

@@ -45,6 +45,7 @@ export default function AdminProductConfigurator() {
   const [saving, setSaving] = useState(false);
   const [product, setProduct] = useState(null);
   const [allMasters, setAllMasters] = useState([]);
+  const [optionMasterSearch, setOptionMasterSearch] = useState('');
   const [availableTemplates, setAvailableTemplates] = useState([]);
 
   // Active edit state
@@ -65,6 +66,11 @@ export default function AdminProductConfigurator() {
   const [bulkMarkupValue, setBulkMarkupValue] = useState(10);
   const [matrixFilter, setMatrixFilter] = useState('');
   const [matrixQtyFilter, setMatrixQtyFilter] = useState('ALL');
+
+  // Phase 8D-1: purely local UI state — which rows in the "Applicable Options" table have their
+  // technical/advanced fields (Master Code, Pricing Behavior) expanded. Never sent to the server,
+  // never affects optionMappings data, defaults to fully collapsed (clean view).
+  const [expandedAdvancedRows, setExpandedAdvancedRows] = useState({});
 
   // UI Toast
   const [toastMessage, setToastMessage] = useState('');
@@ -582,6 +588,16 @@ export default function AdminProductConfigurator() {
     setOptionMappings(optionMappings.filter((m) => m.masterId !== masterId));
   };
 
+  // Show/hide this entire option to the customer without removing its mapping
+  // (reuses the existing ProductOptionMapping.isEnabled field already saved by handleSaveConfiguration)
+  const handleToggleMappingEnabled = (masterId) => {
+    setOptionMappings(
+      optionMappings.map((m) =>
+        m.masterId === masterId ? { ...m, isEnabled: !(m.isEnabled !== false) } : m
+      )
+    );
+  };
+
   const handleMoveMapping = (index, direction) => {
     const newIdx = direction === 'up' ? index - 1 : index + 1;
     if (newIdx < 0 || newIdx >= optionMappings.length) return;
@@ -846,8 +862,20 @@ export default function AdminProductConfigurator() {
                 <Label className="font-extrabold text-xs uppercase tracking-wider text-gray-700 block mb-2">
                   Add Reusable Option Master to this Product
                 </Label>
+                <div className="relative mb-2 max-w-xs">
+                  <HiOutlineSearch className="w-4 h-4 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                  <TextInput
+                    sizing="sm"
+                    value={optionMasterSearch}
+                    onChange={(e) => setOptionMasterSearch(e.target.value)}
+                    placeholder="Search option masters (e.g. Size, GSM, Lamination)..."
+                    style={{ paddingLeft: '1.75rem' }}
+                  />
+                </div>
                 <div className="flex flex-wrap gap-2">
-                  {allMasters.map((m) => {
+                  {allMasters
+                    .filter((m) => m.name.toLowerCase().includes(optionMasterSearch.trim().toLowerCase()))
+                    .map((m) => {
                     const isAlreadyAdded = optionMappings.some((map) => map.masterId === m.id);
                     return (
                       <button
@@ -884,11 +912,11 @@ export default function AdminProductConfigurator() {
                 <Table hoverable>
                   <Table.Head>
                     <Table.HeadCell className="w-16">Order</Table.HeadCell>
-                    <Table.HeadCell>Option Name & Master Code</Table.HeadCell>
-                    <Table.HeadCell>Display Label Override</Table.HeadCell>
-                    <Table.HeadCell>Behavior</Table.HeadCell>
-                    <Table.HeadCell>Required?</Table.HeadCell>
-                    <Table.HeadCell>Default Value</Table.HeadCell>
+                    <Table.HeadCell>Option Name</Table.HeadCell>
+                    <Table.HeadCell>Customer Label</Table.HeadCell>
+                    <Table.HeadCell>Required</Table.HeadCell>
+                    <Table.HeadCell>Show to Customer</Table.HeadCell>
+                    <Table.HeadCell>Values</Table.HeadCell>
                     <Table.HeadCell className="text-right">Actions</Table.HeadCell>
                   </Table.Head>
                   <Table.Body className="divide-y">
@@ -902,108 +930,168 @@ export default function AdminProductConfigurator() {
                       optionMappings.map((mapping, idx) => {
                         const master = mapping.master || allMasters.find((m) => m.id === mapping.masterId);
                         const availableVals = mapping.valueMappings || master?.values || [];
+                        const isMappingVisible = mapping.isEnabled !== false;
+                        const rowKey = mapping.id || mapping.masterId;
+                        const isAdvancedOpen = !!expandedAdvancedRows[mapping.masterId];
+                        const enabledValueCount = availableVals.filter((v) => v.isEnabled !== false).length;
 
                         return (
-                          <Table.Row key={mapping.id || mapping.masterId} className="bg-white">
-                            <Table.Cell className="font-bold text-gray-700">
-                              <div className="flex items-center gap-1">
-                                <span className="text-xs font-black">{idx + 1}</span>
-                                <div className="flex flex-col">
-                                  <button
-                                    type="button"
-                                    disabled={idx === 0}
-                                    onClick={() => handleMoveMapping(idx, 'up')}
-                                    className="p-0.5 text-gray-400 hover:text-black disabled:opacity-20"
-                                  >
-                                    <HiOutlineChevronUp className="w-3 h-3" />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    disabled={idx === optionMappings.length - 1}
-                                    onClick={() => handleMoveMapping(idx, 'down')}
-                                    className="p-0.5 text-gray-400 hover:text-black disabled:opacity-20"
-                                  >
-                                    <HiOutlineChevronDown className="w-3 h-3" />
-                                  </button>
+                          <React.Fragment key={rowKey}>
+                            <Table.Row
+                              className={isMappingVisible ? 'bg-white' : 'bg-gray-50 opacity-60'}
+                            >
+                              <Table.Cell className="font-bold text-gray-700">
+                                <div className="flex items-center gap-1">
+                                  <span className="text-xs font-black">{idx + 1}</span>
+                                  <div className="flex flex-col">
+                                    <button
+                                      type="button"
+                                      disabled={idx === 0}
+                                      onClick={() => handleMoveMapping(idx, 'up')}
+                                      className="p-0.5 text-gray-400 hover:text-black disabled:opacity-20"
+                                    >
+                                      <HiOutlineChevronUp className="w-3 h-3" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={idx === optionMappings.length - 1}
+                                      onClick={() => handleMoveMapping(idx, 'down')}
+                                      className="p-0.5 text-gray-400 hover:text-black disabled:opacity-20"
+                                    >
+                                      <HiOutlineChevronDown className="w-3 h-3" />
+                                    </button>
+                                  </div>
                                 </div>
-                              </div>
-                            </Table.Cell>
+                              </Table.Cell>
 
-                            <Table.Cell>
-                              <span className="font-black text-sm text-gray-900 block">{master?.name || mapping.customLabel}</span>
-                              <span className="text-[10px] font-mono text-gray-400 block">{master?.code}</span>
-                            </Table.Cell>
+                              <Table.Cell>
+                                <span className="font-black text-sm text-gray-900 block">{master?.name || mapping.customLabel}</span>
+                              </Table.Cell>
 
-                            <Table.Cell>
-                              <TextInput
-                                size="sm"
-                                value={mapping.customLabel || ''}
-                                onChange={(e) => {
-                                  const updated = [...optionMappings];
-                                  updated[idx].customLabel = e.target.value;
-                                  setOptionMappings(updated);
-                                }}
-                                placeholder={master?.name}
-                                className="w-44 text-xs font-medium"
-                              />
-                            </Table.Cell>
-
-                            <Table.Cell>
-                              <Badge color={mapping.isAddon ? 'purple' : 'info'} size="sm">
-                                {mapping.isAddon ? 'Add-on Surcharge' : 'Matrix Dimension'}
-                              </Badge>
-                            </Table.Cell>
-
-                            <Table.Cell>
-                              <label className="flex items-center gap-2 cursor-pointer">
-                                <Checkbox
-                                  checked={mapping.isRequired !== false}
+                              <Table.Cell>
+                                <TextInput
+                                  size="sm"
+                                  value={mapping.customLabel || ''}
                                   onChange={(e) => {
                                     const updated = [...optionMappings];
-                                    updated[idx].isRequired = e.target.checked;
+                                    updated[idx].customLabel = e.target.value;
                                     setOptionMappings(updated);
                                   }}
+                                  placeholder={master?.name}
+                                  className="w-44 text-xs font-medium"
                                 />
-                                <span className="text-xs font-bold text-gray-700">
-                                  {mapping.isRequired !== false ? 'Required' : 'Optional'}
-                                </span>
-                              </label>
-                            </Table.Cell>
+                              </Table.Cell>
 
-                            <Table.Cell>
-                              <Select
-                                size="sm"
-                                value={mapping.defaultValue || ''}
-                                onChange={(e) => {
-                                  const updated = [...optionMappings];
-                                  updated[idx].defaultValue = e.target.value;
-                                  setOptionMappings(updated);
-                                }}
-                                className="text-xs w-48"
-                              >
-                                <option value="">-- None / Select at checkout --</option>
-                                {availableVals.map((v) => {
-                                  const label = v.customLabel || v.label || v.masterValue?.label;
-                                  return (
-                                    <option key={v.id || label} value={label}>
-                                      {label}
-                                    </option>
-                                  );
-                                })}
-                              </Select>
-                            </Table.Cell>
+                              <Table.Cell>
+                                <label className="flex items-center gap-2 cursor-pointer">
+                                  <Checkbox
+                                    checked={mapping.isRequired !== false}
+                                    onChange={(e) => {
+                                      const updated = [...optionMappings];
+                                      updated[idx].isRequired = e.target.checked;
+                                      setOptionMappings(updated);
+                                    }}
+                                  />
+                                  <span className="text-xs font-bold text-gray-700">
+                                    {mapping.isRequired !== false ? 'Required' : 'Optional'}
+                                  </span>
+                                </label>
+                              </Table.Cell>
 
-                            <Table.Cell className="text-right">
-                              <button
-                                type="button"
-                                onClick={() => handleRemoveMapping(mapping.masterId)}
-                                className="p-1.5 text-red-500 hover:text-red-700 hover:bg-red-50 rounded"
-                                title="Remove Option"
-                              >
-                                <HiOutlineTrash className="w-4 h-4" />
-                              </button>
-                            </Table.Cell>
-                          </Table.Row>
+                              <Table.Cell>
+                                <label className="flex items-center gap-2 cursor-pointer" title="Controls ProductOptionMapping.isEnabled — hides this option from the customer without deleting it">
+                                  <Checkbox
+                                    checked={isMappingVisible}
+                                    onChange={() => handleToggleMappingEnabled(mapping.masterId)}
+                                  />
+                                  <span className={`text-xs font-bold ${isMappingVisible ? 'text-green-700' : 'text-gray-400'}`}>
+                                    {isMappingVisible ? 'Visible' : 'Hidden'}
+                                  </span>
+                                </label>
+                              </Table.Cell>
+
+                              <Table.Cell>
+                                <div className="flex flex-col gap-1">
+                                  <span className="text-[11px] font-bold text-gray-500">
+                                    {enabledValueCount} of {availableVals.length} values shown
+                                  </span>
+                                  <Select
+                                    size="sm"
+                                    value={mapping.defaultValue || ''}
+                                    onChange={(e) => {
+                                      const updated = [...optionMappings];
+                                      updated[idx].defaultValue = e.target.value;
+                                      setOptionMappings(updated);
+                                    }}
+                                    className="text-xs w-48"
+                                  >
+                                    <option value="">-- Default: None / Select at checkout --</option>
+                                    {availableVals.map((v) => {
+                                      const label = v.customLabel || v.label || v.masterValue?.label;
+                                      return (
+                                        <option key={v.id || label} value={label}>
+                                          {label}
+                                        </option>
+                                      );
+                                    })}
+                                  </Select>
+                                </div>
+                              </Table.Cell>
+
+                              <Table.Cell className="text-right">
+                                <div className="flex items-center justify-end gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setExpandedAdvancedRows((prev) => ({
+                                        ...prev,
+                                        [mapping.masterId]: !prev[mapping.masterId],
+                                      }))
+                                    }
+                                    className={`p-1.5 rounded ${
+                                      isAdvancedOpen
+                                        ? 'text-purple-700 bg-purple-50'
+                                        : 'text-gray-400 hover:text-gray-700 hover:bg-gray-100'
+                                    }`}
+                                    title="Show technical fields (master code, pricing behavior)"
+                                  >
+                                    <HiOutlineAdjustments className="w-4 h-4" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemoveMapping(mapping.masterId)}
+                                    className="p-1.5 text-red-500 hover:text-red-700 hover:bg-red-50 rounded"
+                                    title="Remove Option"
+                                  >
+                                    <HiOutlineTrash className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              </Table.Cell>
+                            </Table.Row>
+
+                            {isAdvancedOpen && (
+                              <Table.Row className="bg-purple-50/40">
+                                <Table.Cell />
+                                <Table.Cell colSpan={6}>
+                                  <div className="flex flex-wrap items-center gap-4 py-1">
+                                    <span className="text-[11px] text-gray-600">
+                                      <span className="font-bold text-gray-700">Master Code:</span>{' '}
+                                      <span className="font-mono">{master?.code}</span>
+                                    </span>
+                                    <span className="text-[11px] text-gray-600 flex items-center gap-1.5">
+                                      <span className="font-bold text-gray-700">Pricing Behavior:</span>
+                                      <Badge color={mapping.isAddon ? 'purple' : 'info'} size="sm">
+                                        {mapping.isAddon ? 'Add-on Surcharge' : 'Matrix Dimension'}
+                                      </Badge>
+                                    </span>
+                                    <span className="text-[10px] text-gray-400">
+                                      (Advanced — set automatically when the option was added; not normally edited here.)
+                                    </span>
+                                  </div>
+                                </Table.Cell>
+                              </Table.Row>
+                            )}
+                          </React.Fragment>
                         );
                       })
                     )}
@@ -1122,55 +1210,67 @@ export default function AdminProductConfigurator() {
           {/* TAB 3: Pricing Matrix & Slabs */}
           <Tabs.Item title="3. Pricing Matrix & Volume Tiers" icon={HiOutlineCurrencyRupee}>
             <div className="p-4 sm:p-6 space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div
-                  onClick={() => setPricingType('TIERED')}
-                  className={`p-4 rounded-xl border-2 cursor-pointer transition-all ${
-                    pricingType === 'TIERED'
-                      ? 'border-purple-600 bg-purple-50 shadow-xs ring-2 ring-purple-400/30'
-                      : 'border-gray-200 bg-white hover:border-gray-300'
-                  }`}
-                >
-                  <h4 className="font-black text-sm text-gray-900">Volume Quantity Slabs</h4>
-                  <p className="text-xs text-gray-500 mt-1">
-                    Standard tiered pricing for 100, 250, 500, 1000, 2000 units with separate Single & Double Side rates.
-                  </p>
+              <div className="space-y-3">
+                <Label className="font-extrabold text-xs uppercase tracking-wider text-gray-700 block">
+                  Pricing Mode — choose one. Only that mode's tools are shown below.
+                </Label>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div
+                    onClick={() => setPricingType('TIERED')}
+                    className={`p-4 rounded-xl border-2 cursor-pointer transition-all ${
+                      pricingType === 'TIERED'
+                        ? 'border-purple-600 bg-purple-50 shadow-xs ring-2 ring-purple-400/30'
+                        : 'border-gray-200 bg-white hover:border-gray-300'
+                    }`}
+                  >
+                    <h4 className="font-black text-sm text-gray-900">🟢 Simple Pricing</h4>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Quantity → Price. One rate per quantity tier (e.g. 100 pcs = ₹200), with separate Single &amp; Double Side rates. Best for most products.
+                    </p>
+                  </div>
+
+                  <div
+                    onClick={() => setPricingType('MATRIX')}
+                    className={`p-4 rounded-xl border-2 cursor-pointer transition-all ${
+                      pricingType === 'MATRIX'
+                        ? 'border-purple-600 bg-purple-50 shadow-xs ring-2 ring-purple-400/30'
+                        : 'border-gray-200 bg-white hover:border-gray-300'
+                    }`}
+                  >
+                    <h4 className="font-black text-sm text-gray-900">🔵 Advanced Pricing</h4>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Quantity × Options → Price. Use when price depends on which options are picked (e.g. Print Side, Corner, Lamination).
+                    </p>
+                  </div>
                 </div>
 
-                <div
-                  onClick={() => setPricingType('MATRIX')}
-                  className={`p-4 rounded-xl border-2 cursor-pointer transition-all ${
-                    pricingType === 'MATRIX'
-                      ? 'border-purple-600 bg-purple-50 shadow-xs ring-2 ring-purple-400/30'
-                      : 'border-gray-200 bg-white hover:border-gray-300'
-                  }`}
-                >
-                  <h4 className="font-black text-sm text-gray-900">Exact Pricing Matrix</h4>
-                  <p className="text-xs text-gray-500 mt-1">
-                    Lookup exact price combinations matching Size × Material × Printing × Finish × Quantity.
-                  </p>
-                </div>
-
-                <div
-                  onClick={() => setPricingType('PER_SQFT')}
-                  className={`p-4 rounded-xl border-2 cursor-pointer transition-all ${
-                    pricingType === 'PER_SQFT' || pricingType === 'CUSTOM_UNIT'
-                      ? 'border-purple-600 bg-purple-50 shadow-xs ring-2 ring-purple-400/30'
-                      : 'border-gray-200 bg-white hover:border-gray-300'
-                  }`}
-                >
-                  <h4 className="font-black text-sm text-gray-900">Formula / Custom Rate</h4>
-                  <p className="text-xs text-gray-500 mt-1">
-                    Linear rate per unit or sq.ft (e.g. ₹18 / sq.ft for Flex, ₹0.85 / card for bulk).
-                  </p>
-                </div>
+                <details className="group" open={pricingType === 'PER_SQFT' || pricingType === 'CUSTOM_UNIT'}>
+                  <summary className="text-[11px] font-bold text-gray-400 hover:text-gray-600 cursor-pointer list-none flex items-center gap-1">
+                    <HiOutlineFilter className="w-3 h-3" />
+                    Special case: rate per unit / sq.ft (rarely needed — e.g. Banners, Flex)
+                  </summary>
+                  <div
+                    onClick={() => setPricingType('PER_SQFT')}
+                    className={`mt-2 p-4 rounded-xl border-2 cursor-pointer transition-all ${
+                      pricingType === 'PER_SQFT' || pricingType === 'CUSTOM_UNIT'
+                        ? 'border-purple-600 bg-purple-50 shadow-xs ring-2 ring-purple-400/30'
+                        : 'border-gray-200 bg-white hover:border-gray-300'
+                    }`}
+                  >
+                    <h4 className="font-black text-sm text-gray-900">⚙️ Custom Rate</h4>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Linear rate per unit or sq.ft (e.g. ₹18 / sq.ft for Flex, ₹0.85 / card for bulk).
+                    </p>
+                  </div>
+                </details>
               </div>
 
               {pricingType === 'TIERED' && (
                 <div className="space-y-4">
                   <div className="flex justify-between items-center">
                     <h3 className="font-extrabold text-sm text-gray-900 uppercase tracking-wider">
-                      Volume Quantity Slabs ({priceSlabs.length} Tiers)
+                      Simple Pricing — Quantity → Price ({priceSlabs.length} Tiers)
                     </h3>
                     <Button
                       size="xs"
@@ -1271,7 +1371,7 @@ export default function AdminProductConfigurator() {
                       <div className="flex items-center gap-2">
                         <h4 className="text-sm font-black text-purple-950 uppercase tracking-wider flex items-center gap-1.5">
                           <HiOutlineSparkles className="w-4 h-4 text-purple-600" />
-                          Exact Matrix Combinations ({pricingMatrices.length})
+                          Advanced Pricing — Quantity × Options → Price ({pricingMatrices.length} Combinations)
                         </h4>
                         <Badge color="purple" size="sm">
                           {pricingMatrices.filter((m) => m.isAvailable).length} Active

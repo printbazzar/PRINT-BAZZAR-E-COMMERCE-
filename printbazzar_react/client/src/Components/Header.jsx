@@ -87,8 +87,10 @@ export default function Header() {
             </NavLink>
           </div>
 
-          {/* 2. Center: Spacious Search Bar (Desktop) */}
-          <div className="hidden md:block flex-1 max-w-xl mx-auto">
+          {/* 2. Center: Spacious Search Bar (Desktop/Tablet only — below lg, the persistent
+              mobile search bar in StorefrontLayout already covers this, so the two never
+              overlap at any viewport width) */}
+          <div className="hidden lg:block flex-1 max-w-xl mx-auto">
             <Search />
           </div>
 
@@ -125,19 +127,22 @@ export default function Header() {
               </NavLink>
             </nav>
 
-            {/* Categories Drawer Button */}
+            {/* Categories Drawer Button — hidden below lg since MobileBottomNav's own
+                Categories icon already covers every width where this would otherwise
+                duplicate it */}
             <button
               onClick={() => setIsOpenCat(true)}
-              className="hidden sm:inline-flex items-center gap-2 bg-yellow-400 hover:bg-yellow-500 text-black font-extrabold text-xs px-3.5 py-2 rounded-xl transition-all shadow-xs"
+              className="hidden lg:inline-flex items-center gap-2 bg-yellow-400 hover:bg-yellow-500 text-black font-extrabold text-xs px-3.5 py-2 rounded-xl transition-all shadow-xs"
             >
               <HiOutlineViewGrid className="w-4 h-4" />
               <span>Categories ▾</span>
             </button>
 
-            {/* Cart Button with Counter */}
+            {/* Cart Button with Counter — hidden below lg; MobileBottomNav already provides
+                a persistent Cart icon at every width where this button would be hidden */}
             <button
               onClick={() => setIsCartDrawerOpen(true)}
-              className="relative p-2 text-white hover:text-yellow-400 transition-colors flex items-center gap-2"
+              className="relative p-2 text-white hover:text-yellow-400 transition-colors hidden lg:flex items-center gap-2"
               title="View Cart"
             >
               <HiOutlineShoppingCart className="w-6 h-6 sm:w-7 sm:h-7" />
@@ -149,11 +154,13 @@ export default function Header() {
               )}
             </button>
 
-            {/* Customer / Corporate Portal Account Link */}
+            {/* Customer / Corporate Portal Account Link — hidden below lg; MobileBottomNav's
+                Account icon already provides this at every width where it would otherwise
+                duplicate it */}
             {isCustomerLoggedIn ? (
               <Link
                 to="/account/dashboard"
-                className="hidden sm:inline-flex items-center gap-1.5 bg-gray-800 hover:bg-gray-700 text-white font-extrabold text-xs px-3 py-2 rounded-xl transition-all border border-gray-700 shadow-xs"
+                className="hidden lg:inline-flex items-center gap-1.5 bg-gray-800 hover:bg-gray-700 text-white font-extrabold text-xs px-3 py-2 rounded-xl transition-all border border-gray-700 shadow-xs"
                 title="Customer Dashboard"
               >
                 <HiOutlineUser className="w-4 h-4 text-yellow-400" />
@@ -167,7 +174,7 @@ export default function Header() {
             ) : (
               <Link
                 to="/account/login"
-                className="hidden sm:inline-flex items-center gap-1.5 text-gray-300 hover:text-yellow-400 font-extrabold text-xs px-2.5 py-2 rounded-xl transition-all"
+                className="hidden lg:inline-flex items-center gap-1.5 text-gray-300 hover:text-yellow-400 font-extrabold text-xs px-2.5 py-2 rounded-xl transition-all"
               >
                 <HiOutlineUser className="w-4 h-4" />
                 <span>Sign In</span>
@@ -241,7 +248,7 @@ export default function Header() {
         className="w-80 bg-white p-6 z-50 shadow-2xl"
       >
         <div className="flex justify-between items-center pb-4 border-b mb-4">
-          <h3 className="font-bold text-gray-900 text-base">Menu & Navigation</h3>
+          <h3 className="font-bold text-gray-900 text-base">More</h3>
           <button
             onClick={() => setIsOpenMenu(false)}
             className="text-gray-400 hover:text-gray-700 font-bold p-1 text-lg"
@@ -250,92 +257,40 @@ export default function Header() {
           </button>
         </div>
 
-        <div className="space-y-4">
-          {/* Mobile Search Input */}
-          <div className="pb-2 border-b">
-            <Search />
-          </div>
-
-          <div className="space-y-1.5 text-sm font-bold text-gray-800">
-            <Link
-              to="/"
-              onClick={() => setIsOpenMenu(false)}
-              className="block py-2 px-3 hover:bg-yellow-50 rounded-xl"
-            >
-              Home
-            </Link>
-            <Link
-              to="/shop"
-              onClick={() => setIsOpenMenu(false)}
-              className="block py-2 px-3 hover:bg-yellow-50 rounded-xl"
-            >
-              All Categories & Products
-            </Link>
-            <Link
-              to="/track-order"
-              onClick={() => setIsOpenMenu(false)}
-              className="block py-2 px-3 bg-yellow-50 text-yellow-900 rounded-xl font-bold flex items-center justify-between"
-            >
-              <span>Track Live Order</span>
-              <span>➔</span>
-            </Link>
-            <Link
-              to="/cart"
-              onClick={() => setIsOpenMenu(false)}
-              className="block py-2 px-3 hover:bg-yellow-50 rounded-xl flex items-center justify-between"
-            >
-              <span>Shopping Cart</span>
-              <span className="bg-red-600 text-white text-xs px-2 py-0.5 rounded-full font-bold">
-                {cartCount}
-              </span>
-            </Link>
-            <Link
-              to="/about-us"
-              onClick={() => setIsOpenMenu(false)}
-              className="block py-2 px-3 hover:bg-yellow-50 rounded-xl"
-            >
-              About Us
-            </Link>
-            <Link
-              to="/contact-us"
-              onClick={() => setIsOpenMenu(false)}
-              className="block py-2 px-3 hover:bg-yellow-50 rounded-xl"
-            >
-              Contact Us
-            </Link>
-            {isCustomerLoggedIn ? (
-              <Link
-                to="/account/dashboard"
-                onClick={() => setIsOpenMenu(false)}
-                className="block py-2 px-3 bg-gray-900 text-white rounded-xl font-bold text-xs"
-              >
-                👤 Customer Account ({isCorporate ? (customer.companyName || customer.name) : customer.name})
-              </Link>
-            ) : (
-              <Link
-                to="/account/login"
-                onClick={() => setIsOpenMenu(false)}
-                className="block py-2 px-3 bg-yellow-400 text-black rounded-xl font-bold text-xs"
-              >
-                👤 Sign In / Create Account
-              </Link>
-            )}
-          </div>
-
-          <div className="border-t pt-4">
-            <h4 className="text-[11px] uppercase text-gray-400 font-bold mb-2">Explore Categories</h4>
-            <div className="space-y-1 max-h-52 overflow-y-auto">
-              {categories.map((cat) => (
-                <button
-                  key={cat.id}
-                  onClick={() => handleCategoryClick(cat.slug)}
-                  className="w-full text-left py-1.5 px-2 text-xs font-medium text-gray-600 hover:text-black hover:bg-gray-50 rounded-lg truncate"
-                >
-                  {cat.name}
-                </button>
-              ))}
-            </div>
-          </div>
+        {/* Home, Categories, Search, Cart and Account already have a dedicated,
+            always-visible icon in MobileBottomNav at every width this drawer opens at —
+            this menu only holds the links that aren't covered there, to avoid duplicate
+            navigation surfaces. */}
+        <div className="space-y-1.5 text-sm font-bold text-gray-800">
+          <Link
+            to="/shop"
+            onClick={() => setIsOpenMenu(false)}
+            className="block py-2 px-3 hover:bg-yellow-50 rounded-xl"
+          >
+            All Categories & Products
+          </Link>
+          <Link
+            to="/track-order"
+            onClick={() => setIsOpenMenu(false)}
+            className="block py-2 px-3 bg-yellow-50 text-yellow-900 rounded-xl font-bold flex items-center justify-between"
+          >
+            <span>Track Live Order</span>
+            <span>➔</span>
+          </Link>
+          <Link
+            to="/about-us"
+            onClick={() => setIsOpenMenu(false)}
+            className="block py-2 px-3 hover:bg-yellow-50 rounded-xl"
+          >
+            About Us
+          </Link>
+          <Link
+            to="/contact-us"
+            onClick={() => setIsOpenMenu(false)}
+            className="block py-2 px-3 hover:bg-yellow-50 rounded-xl"
+          >
+            Contact Us
+          </Link>
         </div>
       </Drawer>
     </header>

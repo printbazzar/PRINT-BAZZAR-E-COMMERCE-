@@ -95,6 +95,7 @@ const Search = () => {
     <div ref={containerRef} className="relative w-full">
       <form onSubmit={handleSearchSubmit} className="relative flex items-center">
         <TextInput
+          id="storefront-search-input"
           type="text"
           placeholder="Search products, visiting cards, stickers..."
           value={searchQuery}

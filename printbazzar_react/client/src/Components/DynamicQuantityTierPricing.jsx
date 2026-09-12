@@ -1,5 +1,5 @@
 ﻿import React, { useMemo } from 'react';
-import { HiCheckCircle, HiTrendingDown, HiOutlineLightningBolt, HiOutlinePlus, HiOutlineMinus } from 'react-icons/hi';
+import { HiCheckCircle, HiTrendingDown, HiOutlinePlus, HiOutlineMinus } from 'react-icons/hi';
 import { getQuantityTierPricing, calculatePricing } from '../utils/pricingEngine';
 
 export default function DynamicQuantityTierPricing({
@@ -75,16 +75,12 @@ export default function DynamicQuantityTierPricing({
         </div>
 
         {savingsPercentage > 0 && (
-          <span className="inline-flex items-center gap-1 text-[11px] font-black text-green-700 bg-green-100 px-2.5 py-0.5 rounded-full shadow-2xs animate-pulse">
+          <span className="inline-flex items-center gap-1 text-[11px] font-black text-green-700 bg-green-100 px-2.5 py-0.5 rounded-full shadow-2xs">
             <HiTrendingDown className="w-3.5 h-3.5 text-green-600" />
             Save {savingsPercentage}% Per Unit
           </span>
         )}
       </div>
-
-      <p className="text-[11px] text-gray-500">
-        Industrial commercial offset & digital volume pricing: the more you print, the less you pay per piece.
-      </p>
 
       {/* Dynamic Quantity Tier Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
@@ -102,8 +98,8 @@ export default function DynamicQuantityTierPricing({
                   : 'border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50 text-gray-800'
               }`}
             >
-              {/* Savings or Popular Badge */}
-              {tier.savingsPct > 0 ? (
+              {/* Savings Badge */}
+              {tier.savingsPct > 0 && (
                 <span
                   className={`absolute -top-2 right-1 text-[8px] font-black px-1.5 py-0.2 rounded-full uppercase tracking-wider shadow-2xs ${
                     isSelected ? 'bg-black text-yellow-300' : 'bg-green-600 text-white'
@@ -111,15 +107,7 @@ export default function DynamicQuantityTierPricing({
                 >
                   Save {tier.savingsPct}%
                 </span>
-              ) : tier.isPopular ? (
-                <span
-                  className={`absolute -top-2 right-1 text-[8px] font-black px-1.5 py-0.2 rounded-full uppercase tracking-wider shadow-2xs ${
-                    isSelected ? 'bg-black text-yellow-300' : 'bg-purple-700 text-white'
-                  }`}
-                >
-                  Popular
-                </span>
-              ) : null}
+              )}
 
               {/* Quantity */}
               <div>
@@ -130,56 +118,10 @@ export default function DynamicQuantityTierPricing({
                   {quantityUnit}
                 </span>
               </div>
-
-              {/* Per-Unit Price (Drops for higher quantities) */}
-              <div className="mt-2 pt-1.5 border-t border-black/10">
-                <span className={`text-xs font-black block ${isSelected ? 'text-black' : 'text-red-600'}`}>
-                  ₹{tier.unitPrice}
-                </span>
-                <span className={`text-[9px] block ${isSelected ? 'text-black/70' : 'text-gray-400'}`}>
-                  per {singleUnitWord}
-                </span>
-              </div>
-
-              {/* Total Price */}
-              <div className="mt-1">
-                <span className={`text-[10px] font-bold block ${isSelected ? 'text-black font-extrabold' : 'text-gray-600'}`}>
-                  ₹{tier.totalPrice.toLocaleString()}
-                </span>
-              </div>
             </button>
           );
         })}
       </div>
-
-      {/* Interactive Bulk Savings Callout */}
-      {savingsPerUnit > 0 ? (
-        <div className="p-3 bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-xl flex items-center justify-between gap-3 text-xs">
-          <div className="flex items-center gap-2">
-            <span className="text-lg">💰</span>
-            <div>
-              <span className="font-extrabold text-green-900 block">
-                Bulk Advantage Active: You Save ₹{savingsPerUnit} Per {singleUnitWord.toUpperCase()}!
-              </span>
-              <span className="text-[11px] text-green-700">
-                At {quantity.toLocaleString()} units, your unit cost drops from ₹{baseUnitPrice} to ₹{currentUnitPrice}. You save a total of <strong>₹{totalSaved.toLocaleString()}</strong>.
-              </span>
-            </div>
-          </div>
-          <div className="text-right shrink-0">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-green-800 bg-green-200/80 px-2 py-0.5 rounded-full">
-              {savingsPercentage}% OFF Base
-            </span>
-          </div>
-        </div>
-      ) : (
-        <div className="p-2.5 bg-yellow-50/60 border border-yellow-200 rounded-xl flex items-center gap-2 text-xs text-yellow-900">
-          <HiOutlineLightningBolt className="w-4 h-4 text-yellow-600 shrink-0" />
-          <span className="text-[11px]">
-            <strong>Pro Tip:</strong> Increase order quantity to <strong>500</strong> or <strong>1,000 units</strong> to unlock up to <strong>50%+ per-unit bulk discounts</strong>.
-          </span>
-        </div>
-      )}
 
       {/* Custom Quantity Stepper & Direct Input */}
       <div className="p-3 bg-gray-50 border border-gray-200 rounded-xl flex flex-wrap items-center justify-between gap-3">
@@ -197,7 +139,7 @@ export default function DynamicQuantityTierPricing({
             type="button"
             onClick={() => handleStepQuantity(-1)}
             disabled={quantity <= (product?.customQtyMin || product?.minQuantity || 50)}
-            className="w-8 h-8 rounded-lg bg-white border border-gray-300 hover:bg-gray-100 flex items-center justify-center text-gray-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            className="w-11 h-11 rounded-lg bg-white border border-gray-300 hover:bg-gray-100 flex items-center justify-center text-gray-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
             title="Decrease Quantity"
           >
             <HiOutlineMinus className="w-3.5 h-3.5" />
@@ -222,7 +164,7 @@ export default function DynamicQuantityTierPricing({
           <button
             type="button"
             onClick={() => handleStepQuantity(1)}
-            className="w-8 h-8 rounded-lg bg-white border border-gray-300 hover:bg-gray-100 flex items-center justify-center text-gray-700 transition-colors"
+            className="w-11 h-11 rounded-lg bg-white border border-gray-300 hover:bg-gray-100 flex items-center justify-center text-gray-700 transition-colors"
             title="Increase Quantity"
           >
             <HiOutlinePlus className="w-3.5 h-3.5" />

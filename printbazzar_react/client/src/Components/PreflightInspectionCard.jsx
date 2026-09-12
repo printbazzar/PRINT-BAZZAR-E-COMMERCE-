@@ -22,6 +22,7 @@ export default function PreflightInspectionCard({
   const [showBleedGuide, setShowBleedGuide] = useState(true);
   const [showTrimGuide, setShowTrimGuide] = useState(true);
   const [showSafeZone, setShowSafeZone] = useState(true);
+  const [showTechnicalDetails, setShowTechnicalDetails] = useState(false);
 
   if (!report) return null;
 
@@ -45,13 +46,13 @@ export default function PreflightInspectionCard({
         <div className="flex items-center gap-2.5">
           {isPass && <HiOutlineCheckCircle className="w-6 h-6 text-green-600 flex-shrink-0" />}
           {isWarning && <HiOutlineExclamation className="w-6 h-6 text-yellow-600 flex-shrink-0" />}
-          {isBlock && <HiOutlineXCircle className="w-6 h-6 text-red-600 flex-shrink-0 animate-pulse" />}
+          {isBlock && <HiOutlineXCircle className="w-6 h-6 text-red-600 flex-shrink-0" />}
 
           <div>
             <h4 className="font-extrabold text-sm sm:text-base leading-tight">
-              {isPass && '✔ Automated Technical Preflight: Print Ready'}
-              {isWarning && '⚠ Quality Notice: Technical Advisory'}
-              {isBlock && '❌ Action Required: Incorrect File Specification'}
+              {isPass && '✓ READY'}
+              {isWarning && '⚠ WARNING'}
+              {isBlock && '✕ FIX REQUIRED'}
             </h4>
             <p className="text-[11px] opacity-80 mt-0.5">
               File: <strong className="font-mono">{report.fileName}</strong> ({report.fileSizeMb} MB • {report.fileType})
@@ -152,8 +153,18 @@ export default function PreflightInspectionCard({
         </div>
       )}
 
-      {/* 3. Preflight Technical Checklist Findings */}
-      <div className="mt-4 space-y-2 text-xs">
+      {/* 3. Preflight Technical Checklist Findings — kept available but collapsed by default so
+          DPI/CMYK/bleed terminology doesn't dominate the screen for a normal customer. */}
+      <button
+        type="button"
+        onClick={() => setShowTechnicalDetails(!showTechnicalDetails)}
+        className="mt-4 text-[11px] font-bold underline opacity-80 hover:opacity-100"
+      >
+        {showTechnicalDetails ? 'Hide Technical Details ▲' : 'View Technical Details ▼'}
+      </button>
+
+      {showTechnicalDetails && (
+      <div className="mt-2 space-y-2 text-xs">
         {/* Resolution DPI */}
         <div className="flex items-start gap-2 bg-white/60 p-2.5 rounded-lg border border-black/5">
           <span className="font-bold min-w-[70px] text-gray-700">Resolution:</span>
@@ -217,6 +228,7 @@ export default function PreflightInspectionCard({
           )}
         </div>
       </div>
+      )}
 
       {/* 4. Blocking Issues Callout */}
       {isBlock && report.issues && report.issues.length > 0 && (

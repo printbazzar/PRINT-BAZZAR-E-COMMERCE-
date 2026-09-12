@@ -21,7 +21,11 @@ const prisma = new PrismaClient();
 // Google ID-token verifier. GOOGLE_CLIENT_ID is loaded by the time this module
 // evaluates because customerAuthController.js imports config/jwt.js above,
 // which calls dotenv.config() as a side effect during its own module init.
-const googleOAuthClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+// Exported (read-only reference to the same client instance) solely so that
+// automated tests can stub the network-bound verifyIdToken() call at this
+// one clean boundary — see tests/checkout-google.test.js. Nothing about the
+// production verification logic, request contract, or control flow changes.
+export const googleOAuthClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 // Helper: Generate Customer JWT Token
 const generateCustomerToken = (customer) => {

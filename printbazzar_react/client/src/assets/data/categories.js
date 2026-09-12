@@ -3,10 +3,8 @@ import {
   HiOutlineTag,
   HiOutlineSpeakerphone,
   HiOutlineMail,
-  HiOutlineGift,
   HiOutlineCube,
   HiOutlineDocumentText,
-  HiOutlineBadgeCheck,
 } from 'react-icons/hi';
 
 import businessCards from '../images/category/business_cards.png'
@@ -16,8 +14,6 @@ import Stickers from '../images/category/stcikers.jpg'
 import Invitations from '../images/category/invitation.jpg'
 import Apparels from '../images/category/apparels.jpg'
 import Packages from '../images/category/packages.jpg'
-import Gifts from '../images/category/gifts.jpg'
-import Certificates from '../images/business_essen/certificate.jpg'
 
 /**
  * SINGLE SOURCE OF TRUTH — hardcoded/fallback category shortcuts.
@@ -40,15 +36,21 @@ import Certificates from '../images/business_essen/certificate.jpg'
  * against the live `/categories` API response — FooterComp's footer
  * category links and every page above depend on these staying correct.
  *
- * NOTE: This intentionally covers the 9 primary departments that were
- * already hardcoded and live in CategoryNavBar. A few secondary catalog
- * categories (e.g. Signages, ID Cards, Certificates, Badges, Awards) are
- * NOT included here because their exact current slugs could not be
- * verified against the live category API in this pass (an old data-seed
- * script uses different slug spellings than the ones already live in this
- * app's nav, e.g. "packagings" vs. the live "packaging-items" used here —
- * a pre-existing inconsistency, left untouched). Add them here with
- * confirmed slugs if the fallback should cover the full catalog.
+ * NOTE: Two entries that used to live here were removed rather than
+ * "fixed", because there was no single unambiguous live category to point
+ * them at:
+ *   - "Corporate Gifts" (slug 'gifts') — the live catalog now has three
+ *     separate gift categories (corporate-gifts, personalised-gifts,
+ *     return-gifts); guessing one would have silently sent customers to
+ *     the wrong one.
+ *   - "Certificates & Awards" (slug 'certificates-and-awards') — the live
+ *     catalog has separate 'certificates' and 'awards' categories, no
+ *     combined slug.
+ * This fallback array is only ever shown for the brief moment before the
+ * live `/categories` API resolves (or on a network failure), so removing
+ * an ambiguous entry is safe — it simply won't appear until the real API
+ * data (which always takes priority) loads. Add either back here only
+ * with a confirmed, unambiguous live slug.
  */
 export const categories = [
   { id: 1, name: 'Visiting Cards', slug: 'business-cards', image: businessCards, icon: HiOutlineCreditCard, isHot: true },
@@ -57,7 +59,5 @@ export const categories = [
   { id: 4, name: 'Business Stationery', slug: 'business-essentials', image: businessEssen, icon: HiOutlineDocumentText },
   { id: 5, name: 'Invitations', slug: 'invitations', image: Invitations, icon: HiOutlineMail },
   { id: 6, name: 'Apparels & Caps', slug: 'apparels', image: Apparels, icon: HiOutlineCube },
-  { id: 7, name: 'Packaging & Bags', slug: 'packaging-items', image: Packages, icon: HiOutlineCube },
-  { id: 8, name: 'Corporate Gifts', slug: 'gifts', image: Gifts, icon: HiOutlineGift },
-  { id: 9, name: 'Certificates & Awards', slug: 'certificates-and-awards', image: Certificates, icon: HiOutlineBadgeCheck },
+  { id: 7, name: 'Packaging & Bags', slug: 'packagings', image: Packages, icon: HiOutlineCube },
 ];

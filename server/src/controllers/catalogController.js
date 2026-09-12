@@ -483,6 +483,7 @@ export const calculatePriceEndpoint = async (req, res) => {
       designOption,
       artworkOption,
       designPackage,
+      selectedAddons,
     } = req.body;
 
     const product = await prisma.product.findFirst({
@@ -517,6 +518,7 @@ export const calculatePriceEndpoint = async (req, res) => {
       designOption,
       artworkOption,
       designPackage,
+      selectedAddons,
     });
 
     return res.json({ success: true, data: pricing, pricing });
