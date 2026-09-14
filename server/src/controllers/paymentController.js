@@ -244,20 +244,51 @@ export const verifyPayment = async (req, res) => {
     const hasDesign = order.items.some((i) => i.designRequired);
     const designFeeTotal = order.items.reduce((sum, item) => sum + (item.designCharge || 0), 0);
 
-    // Cryptographic Signature Verification (when secret and signature provided)
-    if (config.keySecret && gatewayOrderId && signature) {
-      const expectedSignature = crypto
-        .createHmac('sha256', config.keySecret)
-        .update(`${gatewayOrderId}|${paymentId}`)
-        .digest('hex');
+    // Mandatory Cryptographic Signature Verification — fail closed, never skippable.
+    // Production rule: NO VALID RAZORPAY SIGNATURE -> NO PAYMENT SUCCESS -> NO ORDER CONFIRMATION
+    const isProductionEnv = process.env.NODE_ENV === 'production';
 
-      if (expectedSignature !== signature) {
-        console.warn(`[SECURITY ALERT] Invalid payment signature for order ${orderNumber}!`);
-        return res.status(400).json({
-          success: false,
-          message: 'Payment verification failed: Invalid cryptographic signature.',
-        });
-      }
+    if (!gatewayOrderId) {
+      console.warn(`[SECURITY ALERT] Payment verification rejected for order ${orderNumber}: missing gateway order ID.`);
+      return res.status(400).json({
+        success: false,
+        message: 'Payment verification failed: Missing gateway order ID.',
+      });
+    }
+
+    if (!signature) {
+      console.warn(`[SECURITY ALERT] Payment verification rejected for order ${orderNumber}: missing payment signature.`);
+      return res.status(400).json({
+        success: false,
+        message: 'Payment verification failed: Missing payment signature.',
+      });
+    }
+
+    if (isProductionEnv && !config.keySecret) {
+      console.error(`[SECURITY ALERT] Payment verification rejected for order ${orderNumber}: Razorpay key secret is not configured in production.`);
+      return res.status(503).json({
+        success: false,
+        message: 'Payment verification is temporarily unavailable. Please contact support.',
+      });
+    }
+
+    const expectedSignature = crypto
+      .createHmac('sha256', config.keySecret || '')
+      .update(`${gatewayOrderId}|${paymentId}`)
+      .digest('hex');
+
+    const expectedSignatureBuf = Buffer.from(expectedSignature, 'utf8');
+    const providedSignatureBuf = Buffer.from(String(signature), 'utf8');
+
+    if (
+      expectedSignatureBuf.length !== providedSignatureBuf.length ||
+      !crypto.timingSafeEqual(expectedSignatureBuf, providedSignatureBuf)
+    ) {
+      console.warn(`[SECURITY ALERT] Invalid payment signature for order ${orderNumber}!`);
+      return res.status(400).json({
+        success: false,
+        message: 'Payment verification failed: Invalid cryptographic signature.',
+      });
     }
 
     const effectiveTxnRef =
@@ -354,7 +385,7 @@ export const verifyPayment = async (req, res) => {
         paymentId,
         gatewayOrderId,
         paymentStage: isStage1 ? 'DESIGN_FEE' : 'FULL_OR_BALANCE',
-        signatureVerified: Boolean(config.keySecret && signature),
+        signatureVerified: true,
       });
 
       if (!existingSuccessPayment) {
@@ -616,26 +647,33 @@ export const handlePaymentWebhook = async (req, res) => {
     const config = await getGatewayConfig();
     const webhookSecret = config.webhookSecret || process.env.RAZORPAY_WEBHOOK_SECRET || config.keySecret;
 
-    // 1. Strict Cryptographic Signature Verification
-    if (webhookSecret) {
-      if (!signature) {
-        console.warn('[WEBHOOK SECURITY] Rejected webhook: Missing x-razorpay-signature header');
-        return res.status(400).json({ success: false, message: 'Missing x-razorpay-signature header' });
-      }
+    // 1. Mandatory Cryptographic Signature Verification — fail closed, never skippable.
+    // Production rule: NO VALID WEBHOOK SIGNATURE -> NO WEBHOOK PROCESSING
+    if (!webhookSecret) {
+      console.error('[WEBHOOK SECURITY] Rejected webhook: No webhook secret configured. Refusing to process webhook to avoid unverified state changes.');
+      return res.status(503).json({
+        success: false,
+        message: 'Webhook processing is temporarily unavailable: signing secret is not configured.',
+      });
+    }
 
-      const rawPayload = req.rawBody || (typeof req.body === 'string' ? req.body : JSON.stringify(req.body));
-      const expectedSignature = crypto
-        .createHmac('sha256', webhookSecret)
-        .update(rawPayload)
-        .digest('hex');
+    if (!signature) {
+      console.warn('[WEBHOOK SECURITY] Rejected webhook: Missing x-razorpay-signature header');
+      return res.status(400).json({ success: false, message: 'Missing x-razorpay-signature header' });
+    }
 
-      const expectedBuf = Buffer.from(expectedSignature, 'utf8');
-      const signatureBuf = Buffer.from(signature, 'utf8');
+    const rawPayload = req.rawBody || (typeof req.body === 'string' ? req.body : JSON.stringify(req.body));
+    const expectedSignature = crypto
+      .createHmac('sha256', webhookSecret)
+      .update(rawPayload)
+      .digest('hex');
 
-      if (expectedBuf.length !== signatureBuf.length || !crypto.timingSafeEqual(expectedBuf, signatureBuf)) {
-        console.warn('[WEBHOOK SECURITY] Rejected webhook: Invalid cryptographic signature');
-        return res.status(400).json({ success: false, message: 'Invalid webhook signature' });
-      }
+    const expectedBuf = Buffer.from(expectedSignature, 'utf8');
+    const signatureBuf = Buffer.from(signature, 'utf8');
+
+    if (expectedBuf.length !== signatureBuf.length || !crypto.timingSafeEqual(expectedBuf, signatureBuf)) {
+      console.warn('[WEBHOOK SECURITY] Rejected webhook: Invalid cryptographic signature');
+      return res.status(400).json({ success: false, message: 'Invalid webhook signature' });
     }
 
     const event = req.body?.event;
