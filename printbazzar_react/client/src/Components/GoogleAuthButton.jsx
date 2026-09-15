@@ -28,14 +28,69 @@ export function GoogleIcon({ className = 'w-5 h-5' }) {
   );
 }
 
+// Module-level singleton: the Google Identity Services script must be loaded
+// into the page at most once, no matter how many GoogleAuthButton instances
+// mount over the life of the SPA (Checkout, CustomerLogin, CustomerSignup all
+// render this component). A single shared promise means every mounted
+// instance awaits the same load instead of injecting its own <script> tag.
+const GIS_SCRIPT_ID = 'google-gis-script';
+let gisScriptPromise = null;
+
+function loadGoogleIdentityScript() {
+  if (typeof window === 'undefined') {
+    return Promise.reject(new Error('window is not available'));
+  }
+  if (window.google?.accounts?.id) {
+    return Promise.resolve();
+  }
+  if (gisScriptPromise) {
+    return gisScriptPromise;
+  }
+
+  gisScriptPromise = new Promise((resolve, reject) => {
+    const existing = document.getElementById(GIS_SCRIPT_ID);
+    if (existing) {
+      if (window.google?.accounts?.id) {
+        resolve();
+        return;
+      }
+      existing.addEventListener('load', () => resolve(), { once: true });
+      existing.addEventListener(
+        'error',
+        () => reject(new Error('Failed to load Google Identity Services script')),
+        { once: true }
+      );
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.id = GIS_SCRIPT_ID;
+    script.src = 'https://accounts.google.com/gsi/client';
+    script.async = true;
+    script.defer = true;
+    script.onload = () => resolve();
+    script.onerror = () => {
+      gisScriptPromise = null; // allow a retry on the next mount
+      reject(new Error('Failed to load Google Identity Services script'));
+    };
+    document.body.appendChild(script);
+  });
+
+  return gisScriptPromise;
+}
+
 /**
- * 1-Click "Continue with Google" Authentication Component
- * 
- * Features:
- * - Zero SMS gateway cost / zero third-party verification charges
- * - Native Google Identity Services (GIS) Web SDK integration
- * - Automatic customer profile extraction and session creation
- * - Seamless local dev/demo modal fallback when VITE_GOOGLE_CLIENT_ID is not yet configured
+ * "Continue with Google" Authentication Component
+ *
+ * Renders the official Google Identity Services (GIS) "Sign In With Google"
+ * button via google.accounts.id.renderButton() into a real DOM container.
+ * The button's own click handling is entirely owned by Google's rendered
+ * element - this component never calls google.accounts.id.prompt() (One
+ * Tap/FedCM), so a skipped or aborted FedCM prompt can never surface here.
+ *
+ * Dev builds additionally offer a "demo Google account" shortcut (gated on
+ * import.meta.env.DEV, dead-code-eliminated from production) alongside the
+ * real button, for local testing without needing Google to actually resolve.
  */
 export default function GoogleAuthButton({
   onSuccess,
@@ -46,100 +101,128 @@ export default function GoogleAuthButton({
 }) {
   const { loginWithGoogle } = useCustomerAuth();
   const [loading, setLoading] = useState(false);
+  const [gisReady, setGisReady] = useState(false);
   const [showDevModal, setShowDevModal] = useState(false);
   const [showUnavailable, setShowUnavailable] = useState(false);
   const [devEmail, setDevEmail] = useState('');
   const [devName, setDevName] = useState('');
   const googleBtnContainerRef = useRef(null);
+  const initializedRef = useRef(false);
+  const isMountedRef = useRef(true);
 
   const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
-  // Vite statically replaces import.meta.env.DEV at build time (false in production builds),
-  // so the demo/fake-identity modal below is dead-code-eliminated from production bundles.
+  // Vite statically replaces import.meta.env.DEV at build time (false in
+  // production builds), so the dev-only branches below are dead-code
+  // eliminated from production bundles.
   const isDev = import.meta.env.DEV;
 
-  // Load Google Identity Services SDK
   useEffect(() => {
-    if (!googleClientId) return;
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
-    const scriptId = 'google-gis-script';
-    let script = document.getElementById(scriptId);
+  useEffect(() => {
+    if (isDev) {
+      // eslint-disable-next-line no-console
+      console.log('[GoogleAuthButton] Google Client ID configured:', !!googleClientId);
+    }
+    // A missing client ID is a real configuration problem (not a skipped or
+    // aborted FedCM prompt - req #5 only forbids showing this modal for
+    // that case), so there's no working button to render. In dev, leave it
+    // to the always-available demo-account shortcut instead of blocking
+    // the page with a modal.
+    if (!googleClientId && !isDev) {
+      setShowUnavailable(true);
+    }
+  }, [googleClientId, isDev]);
 
-    const initGis = () => {
-      if (window.google?.accounts?.id) {
+  const handleCredentialResponse = async (response) => {
+    if (isDev) {
+      // Never log the credential itself - only whether one arrived.
+      // eslint-disable-next-line no-console
+      console.log('[GoogleAuthButton] Google credential received:', !!response?.credential);
+    }
+    if (!response?.credential) return;
+
+    if (isMountedRef.current) setLoading(true);
+    try {
+      const res = await loginWithGoogle({ credential: response.credential });
+      if (isDev) {
+        // eslint-disable-next-line no-console
+        console.log('[GoogleAuthButton] Google authentication backend success: true');
+      }
+      if (onSuccess) onSuccess(res.customer, res);
+    } catch (err) {
+      if (isDev) {
+        // eslint-disable-next-line no-console
+        console.log('[GoogleAuthButton] Google authentication backend success: false');
+      }
+      console.error('Google auth error:', err);
+      if (onError) onError(err.message || 'Google Sign-In failed');
+    } finally {
+      if (isMountedRef.current) setLoading(false);
+    }
+  };
+
+  // Load GIS once, initialize it once per mounted instance, and render the
+  // official button into this instance's own container. Guarded by
+  // initializedRef so a re-run of this effect (e.g. React StrictMode's dev
+  // double-invoke) never initializes or renders twice.
+  useEffect(() => {
+    if (!googleClientId) return undefined;
+    if (initializedRef.current) return undefined;
+
+    let cancelled = false;
+
+    loadGoogleIdentityScript()
+      .then(() => {
+        if (cancelled || !isMountedRef.current || initializedRef.current) return;
+        if (!window.google?.accounts?.id) {
+          throw new Error('Google Identity Services unavailable after script load');
+        }
+
         window.google.accounts.id.initialize({
           client_id: googleClientId,
           callback: handleCredentialResponse,
         });
 
-        // Optionally render official GIS button if container is present
         if (googleBtnContainerRef.current) {
           window.google.accounts.id.renderButton(googleBtnContainerRef.current, {
             theme: 'outline',
             size: 'large',
-            width: 320,
+            width: '100%',
             text: 'continue_with',
-            shape: 'pill',
+            shape: 'rectangular',
           });
         }
-      }
+
+        initializedRef.current = true;
+        if (isDev) {
+          // eslint-disable-next-line no-console
+          console.log('[GoogleAuthButton] GIS initialized: true');
+        }
+        if (isMountedRef.current) setGisReady(true);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        console.warn('Google Identity Services failed to initialize:', err);
+        if (isDev) {
+          // eslint-disable-next-line no-console
+          console.log('[GoogleAuthButton] GIS initialized: false');
+        }
+        // A genuine script-load/init failure (network blocked, ad blocker,
+        // misconfigured client ID) - not a skipped or aborted FedCM prompt,
+        // since this component never calls google.accounts.id.prompt().
+        if (isMountedRef.current) setShowUnavailable(true);
+      });
+
+    return () => {
+      cancelled = true;
     };
-
-    if (!script) {
-      script = document.createElement('script');
-      script.id = scriptId;
-      script.src = 'https://accounts.google.com/gsi/client';
-      script.async = true;
-      script.defer = true;
-      script.onload = initGis;
-      document.body.appendChild(script);
-    } else if (window.google?.accounts?.id) {
-      initGis();
-    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [googleClientId]);
-
-  const handleCredentialResponse = async (response) => {
-    if (!response?.credential) return;
-    setLoading(true);
-    try {
-      const res = await loginWithGoogle({ credential: response.credential });
-      if (onSuccess) onSuccess(res.customer, res);
-    } catch (err) {
-      console.error('Google auth error:', err);
-      if (onError) onError(err.message || 'Google Sign-In failed');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleClick = () => {
-    // If official client ID is active and GIS is initialized, trigger prompt
-    if (googleClientId && window.google?.accounts?.id) {
-      try {
-        window.google.accounts.id.prompt((notification) => {
-          if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
-            // Real Google prompt was blocked/skipped by the browser.
-            // Dev builds may fall back to the demo picker; production never does.
-            if (isDev) {
-              setShowDevModal(true);
-            } else {
-              setShowUnavailable(true);
-            }
-          }
-        });
-        return;
-      } catch (e) {
-        console.warn('Google prompt fallback:', e);
-      }
-    }
-
-    // Google SDK/client ID unavailable: dev builds may use the demo picker for
-    // local testing; production shows an unavailable message and creates no session.
-    if (isDev) {
-      setShowDevModal(true);
-    } else {
-      setShowUnavailable(true);
-    }
-  };
 
   const handleDevModalSubmit = async (e) => {
     if (e) e.preventDefault();
@@ -170,23 +253,46 @@ export default function GoogleAuthButton({
 
   return (
     <>
-      <button
-        type="button"
-        onClick={handleClick}
-        disabled={loading}
-        className={`inline-flex items-center justify-center gap-3 bg-white hover:bg-gray-50 text-gray-800 font-bold border border-gray-300 hover:border-gray-400 transition-all duration-200 rounded-xl shadow-xs hover:shadow-md cursor-pointer disabled:opacity-50 ${
-          compact ? 'px-3 py-1.5 text-xs' : 'w-full px-4 py-2.5 text-sm'
-        } ${className}`}
-      >
-        {loading ? (
-          <Spinner size="sm" className="mr-1" />
-        ) : (
-          <GoogleIcon className={compact ? 'w-4 h-4' : 'w-5 h-5'} />
-        )}
-        <span className="truncate">{loading ? 'Connecting to Google...' : text}</span>
-      </button>
+      <div className={className}>
+        {/* Real GIS button container - always mounted so the ref is stable
+            for renderButton(), only visually hidden until it's populated.
+            width:'100%' is passed to renderButton() so Google sizes the
+            button to this box; a minWidth keeps it from collapsing to zero
+            when a flex/auto-width ancestor (e.g. Checkout's compact slot)
+            would otherwise give it no intrinsic size. */}
+        <div
+          ref={googleBtnContainerRef}
+          style={{ width: '100%', minWidth: compact ? 200 : undefined }}
+          className={gisReady && !loading ? '' : 'hidden'}
+        />
 
-      {/* Production: Google Sign-In temporarily unavailable — never creates a session */}
+        {!gisReady && (
+          <div
+            className={`inline-flex items-center justify-center gap-3 bg-white text-gray-400 font-bold border border-gray-200 rounded-xl cursor-default select-none ${
+              compact ? 'px-3 py-1.5 text-xs' : 'w-full px-4 py-2.5 text-sm'
+            }`}
+          >
+            <Spinner size="sm" />
+            <span className="truncate">Loading Google Sign-In...</span>
+          </div>
+        )}
+
+        {gisReady && loading && (
+          <div
+            className={`inline-flex items-center justify-center gap-3 bg-white text-gray-800 font-bold border border-gray-300 rounded-xl ${
+              compact ? 'px-3 py-1.5 text-xs' : 'w-full px-4 py-2.5 text-sm'
+            }`}
+          >
+            <Spinner size="sm" />
+            <span className="truncate">Connecting to Google...</span>
+          </div>
+        )}
+      </div>
+
+      {/* Genuine GIS load/init failure only. Never shown merely because a
+          One Tap/FedCM prompt was skipped or aborted - this component
+          doesn't call google.accounts.id.prompt() at all. Never creates a
+          session. */}
       <Modal show={showUnavailable} size="sm" onClose={() => setShowUnavailable(false)} popup>
         <Modal.Header />
         <Modal.Body className="pt-0 text-center">
@@ -203,118 +309,129 @@ export default function GoogleAuthButton({
         </Modal.Body>
       </Modal>
 
-      {/* Development-only / Immediate 1-Click Google Account Selector Modal.
-          Gated on import.meta.env.DEV so this — including the hardcoded demo
-          identities and free-text email field — is dead-code-eliminated from
-          production builds and can never render or execute in production. */}
+      {/* Development-only demo account shortcut, shown alongside the real
+          GIS button above for convenience during local testing. Gated on
+          import.meta.env.DEV so this - including the hardcoded demo
+          identities and free-text email field - is dead-code-eliminated
+          from production builds and can never render or execute there. */}
       {isDev && (
-      <Modal show={showDevModal} size="md" onClose={() => setShowDevModal(false)} popup>
-        <Modal.Header />
-        <Modal.Body className="pt-0">
-          <div className="text-center mb-5">
-            <div className="mx-auto w-12 h-12 bg-white rounded-full shadow-md border flex items-center justify-center mb-3">
-              <GoogleIcon className="w-6 h-6" />
-            </div>
-            <h3 className="text-lg font-black text-gray-900">Sign In with Google</h3>
-            <p className="text-xs text-gray-500 mt-1">
-              Instant 1-click onboarding with zero SMS gateway charges.
-            </p>
-          </div>
+        <>
+          <button
+            type="button"
+            onClick={() => setShowDevModal(true)}
+            className="mt-1.5 text-[11px] font-semibold text-gray-400 hover:text-gray-600 underline underline-offset-2"
+          >
+            {text} (use demo account - dev only)
+          </button>
 
-          {/* Quick Demo Accounts */}
-          <div className="mb-4 space-y-2">
-            <span className="text-[10px] font-black uppercase text-gray-400 block tracking-wider">
-              Quick Accounts
-            </span>
-            <button
-              type="button"
-              onClick={() => {
-                handleQuickDemoSelect('karthik.printers@gmail.com', 'Karthik Raja');
-              }}
-              className={`w-full flex items-center gap-3 p-2.5 rounded-xl border text-left transition-all ${
-                devEmail === 'karthik.printers@gmail.com'
-                  ? 'border-yellow-400 bg-yellow-50/50 ring-2 ring-yellow-400/20'
-                  : 'border-gray-200 hover:bg-gray-50'
-              }`}
-            >
-              <div className="w-8 h-8 rounded-full bg-blue-600 text-white font-black text-xs flex items-center justify-center">
-                KR
+          <Modal show={showDevModal} size="md" onClose={() => setShowDevModal(false)} popup>
+            <Modal.Header />
+            <Modal.Body className="pt-0">
+              <div className="text-center mb-5">
+                <div className="mx-auto w-12 h-12 bg-white rounded-full shadow-md border flex items-center justify-center mb-3">
+                  <GoogleIcon className="w-6 h-6" />
+                </div>
+                <h3 className="text-lg font-black text-gray-900">Sign In with Google</h3>
+                <p className="text-xs text-gray-500 mt-1">
+                  Dev-only demo identity - no real Google account is used.
+                </p>
               </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-xs font-bold text-gray-900 truncate">Karthik Raja</p>
-                <p className="text-[11px] text-gray-500 truncate">karthik.printers@gmail.com</p>
-              </div>
-            </button>
 
-            <button
-              type="button"
-              onClick={() => {
-                handleQuickDemoSelect('priya.designs@gmail.com', 'Priya Sundaram');
-              }}
-              className={`w-full flex items-center gap-3 p-2.5 rounded-xl border text-left transition-all ${
-                devEmail === 'priya.designs@gmail.com'
-                  ? 'border-yellow-400 bg-yellow-50/50 ring-2 ring-yellow-400/20'
-                  : 'border-gray-200 hover:bg-gray-50'
-              }`}
-            >
-              <div className="w-8 h-8 rounded-full bg-emerald-600 text-white font-black text-xs flex items-center justify-center">
-                PS
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-xs font-bold text-gray-900 truncate">Priya Sundaram</p>
-                <p className="text-[11px] text-gray-500 truncate">priya.designs@gmail.com</p>
-              </div>
-            </button>
-          </div>
+              {/* Quick Demo Accounts */}
+              <div className="mb-4 space-y-2">
+                <span className="text-[10px] font-black uppercase text-gray-400 block tracking-wider">
+                  Quick Accounts
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleQuickDemoSelect('karthik.printers@gmail.com', 'Karthik Raja');
+                  }}
+                  className={`w-full flex items-center gap-3 p-2.5 rounded-xl border text-left transition-all ${
+                    devEmail === 'karthik.printers@gmail.com'
+                      ? 'border-yellow-400 bg-yellow-50/50 ring-2 ring-yellow-400/20'
+                      : 'border-gray-200 hover:bg-gray-50'
+                  }`}
+                >
+                  <div className="w-8 h-8 rounded-full bg-blue-600 text-white font-black text-xs flex items-center justify-center">
+                    KR
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-bold text-gray-900 truncate">Karthik Raja</p>
+                    <p className="text-[11px] text-gray-500 truncate">karthik.printers@gmail.com</p>
+                  </div>
+                </button>
 
-          {/* Custom Google Account Entry */}
-          <form onSubmit={handleDevModalSubmit} className="space-y-3 pt-2 border-t">
-            <div>
-              <Label htmlFor="googleEmail" className="text-xs font-bold text-gray-700 block mb-1">
-                Google Account Email
-              </Label>
-              <TextInput
-                id="googleEmail"
-                type="email"
-                placeholder="your.email@gmail.com"
-                value={devEmail}
-                onChange={(e) => setDevEmail(e.target.value)}
-                required
-                sizing="sm"
-              />
-            </div>
-            <div>
-              <Label htmlFor="googleName" className="text-xs font-bold text-gray-700 block mb-1">
-                Full Name
-              </Label>
-              <TextInput
-                id="googleName"
-                type="text"
-                placeholder="e.g. John Doe"
-                value={devName}
-                onChange={(e) => setDevName(e.target.value)}
-                sizing="sm"
-              />
-            </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleQuickDemoSelect('priya.designs@gmail.com', 'Priya Sundaram');
+                  }}
+                  className={`w-full flex items-center gap-3 p-2.5 rounded-xl border text-left transition-all ${
+                    devEmail === 'priya.designs@gmail.com'
+                      ? 'border-yellow-400 bg-yellow-50/50 ring-2 ring-yellow-400/20'
+                      : 'border-gray-200 hover:bg-gray-50'
+                  }`}
+                >
+                  <div className="w-8 h-8 rounded-full bg-emerald-600 text-white font-black text-xs flex items-center justify-center">
+                    PS
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-bold text-gray-900 truncate">Priya Sundaram</p>
+                    <p className="text-[11px] text-gray-500 truncate">priya.designs@gmail.com</p>
+                  </div>
+                </button>
+              </div>
 
-            <div className="flex justify-end gap-2 pt-2">
-              <Button size="xs" color="gray" onClick={() => setShowDevModal(false)}>
-                Cancel
-              </Button>
-              <Button
-                size="xs"
-                color="dark"
-                type="submit"
-                disabled={loading || !devEmail}
-                className="bg-black hover:bg-gray-800 font-bold"
-              >
-                {loading ? <Spinner size="xs" className="mr-1" /> : null}
-                Confirm & Sign In
-              </Button>
-            </div>
-          </form>
-        </Modal.Body>
-      </Modal>
+              {/* Custom Google Account Entry */}
+              <form onSubmit={handleDevModalSubmit} className="space-y-3 pt-2 border-t">
+                <div>
+                  <Label htmlFor="googleEmail" className="text-xs font-bold text-gray-700 block mb-1">
+                    Google Account Email
+                  </Label>
+                  <TextInput
+                    id="googleEmail"
+                    type="email"
+                    placeholder="your.email@gmail.com"
+                    value={devEmail}
+                    onChange={(e) => setDevEmail(e.target.value)}
+                    required
+                    sizing="sm"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="googleName" className="text-xs font-bold text-gray-700 block mb-1">
+                    Full Name
+                  </Label>
+                  <TextInput
+                    id="googleName"
+                    type="text"
+                    placeholder="e.g. John Doe"
+                    value={devName}
+                    onChange={(e) => setDevName(e.target.value)}
+                    sizing="sm"
+                  />
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2">
+                  <Button size="xs" color="gray" onClick={() => setShowDevModal(false)}>
+                    Cancel
+                  </Button>
+                  <Button
+                    size="xs"
+                    color="dark"
+                    type="submit"
+                    disabled={loading || !devEmail}
+                    className="bg-black hover:bg-gray-800 font-bold"
+                  >
+                    {loading ? <Spinner size="xs" className="mr-1" /> : null}
+                    Confirm & Sign In
+                  </Button>
+                </div>
+              </form>
+            </Modal.Body>
+          </Modal>
+        </>
       )}
     </>
   );
