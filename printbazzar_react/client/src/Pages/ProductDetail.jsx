@@ -3,15 +3,11 @@ import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
 import { Breadcrumb, Button, Checkbox, Label, Modal, Select, Spinner, TextInput, Textarea } from 'flowbite-react';
 import {
   HiHome,
-  HiClock,
   HiCheckCircle,
   HiUpload,
   HiOutlineExclamationCircle,
-  HiOutlineShieldCheck,
-  HiOutlineTruck,
   HiOutlineDocumentText,
   HiOutlineSparkles,
-  HiOutlineQuestionMarkCircle,
   HiOutlineColorSwatch,
   HiTrash,
   HiRefresh,
@@ -97,7 +93,9 @@ export default function ProductDetail() {
   const [error, setError] = useState(null);
 
   // Selected state
-  const [selectedImage, setSelectedImage] = useState('');
+  // (selectedImage getter is unused — ProductMediaGallery manages its own displayed image
+  // internally; the setter is kept as-is since removing the call sites is out of scope here.)
+  const [, setSelectedImage] = useState('');
   const [quantity, setQuantity] = useState(100);
   const [selectedOptions, setSelectedOptions] = useState({});
   const [agreeTerms, setAgreeTerms] = useState(true);
@@ -126,7 +124,9 @@ export default function ProductDetail() {
   const [uploadingArtwork, setUploadingArtwork] = useState(false);
   const [uploadError, setUploadError] = useState('');
   const [preflightReport, setPreflightReport] = useState(null);
-  const [isAnalyzingPreflight, setIsAnalyzingPreflight] = useState(false);
+  // (isAnalyzingPreflight getter is unused — no UI currently reads this loading flag; the
+  // setter is kept as-is since removing the call sites is out of scope here.)
+  const [, setIsAnalyzingPreflight] = useState(false);
   const [disclaimerAccepted, setDisclaimerAccepted] = useState(false);
   const [largePreviewOpen, setLargePreviewOpen] = useState(false);
   const [artworkVersion, setArtworkVersion] = useState(1);
@@ -167,6 +167,10 @@ export default function ProductDetail() {
 
   useEffect(() => {
     fetchProduct();
+    // fetchProduct is a large, non-memoized function redefined on every render; adding it to
+    // the dependency array below would re-run this effect (and re-fetch the product) on every
+    // render instead of only when slug changes. Intentionally scoped to fetch-on-slug-change only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug]);
 
   const fetchProduct = async () => {
@@ -367,6 +371,30 @@ export default function ProductDetail() {
       .map((m) => m.customLabel || m.master?.name);
   }, [product, selectedOptions, compatibilityResult]);
 
+  // Single source of truth for whether Add to Cart / Buy Now should be disabled, and WHY —
+  // shared by the desktop CTA row and the mobile sticky CTA bar so both are always in sync.
+  // Order matters: most actionable-by-the-customer reason first (pick an option), server-state
+  // reasons last (still loading / unavailable), since those resolve on their own.
+  const ctaBlockReason = React.useMemo(() => {
+    if (missingRequiredOptions.length > 0) {
+      return `Select ${missingRequiredOptions.join(', ')} to continue`;
+    }
+    if (!compatibilityResult.isCompatible) {
+      return compatibilityResult.activeViolations?.[0]?.reason || 'Selected options are incompatible';
+    }
+    if (pricing.isAvailable === false) {
+      return pricing.unavailableReason || 'This configuration is currently unavailable';
+    }
+    if (priceStale) {
+      return priceLoading ? 'Calculating your price…' : 'Price not confirmed yet';
+    }
+    if (!agreeTerms) {
+      return 'Please accept the order terms to continue';
+    }
+    return null;
+  }, [missingRequiredOptions, compatibilityResult, pricing.isAvailable, pricing.unavailableReason, priceStale, priceLoading, agreeTerms]);
+  const isCtaDisabled = ctaBlockReason !== null;
+
   // Group all visible, applicable options (core + add-on) into a small set of guided-flow
   // sections (Specifications / Paper / Printing / Finish) instead of one long flat list. Purely
   // derived from the existing optionMappings — no separate configuration system, no change to
@@ -388,8 +416,11 @@ export default function ProductDetail() {
       : (product.options || []).filter((o) => o.isAddon);
 
     const hasGsmInCore = coreList.some((item) => {
-      const n = (hasDynamic ? (item.customLabel || item.master?.name) : item.optionName || '').toLowerCase();
-      const c = (hasDynamic ? (item.master?.code) : '').toLowerCase();
+      // Defaulted to '' before calling .toLowerCase() — item.master can be null/undefined
+      // for a given optionMapping, and without the fallback this would throw
+      // "Cannot read properties of undefined (reading 'toLowerCase')" and crash the page.
+      const n = (hasDynamic ? (item.customLabel || item.master?.name || '') : (item.optionName || '')).toLowerCase();
+      const c = (hasDynamic ? (item.master?.code || '') : '').toLowerCase();
       return (
         n.includes('gsm') || n.includes('paper stock') || n.includes('paper quality') || n.includes('paper material') ||
         c.includes('gsm') || c.includes('paper_stock') || c.includes('paper_quality') || c.includes('paper_material')
@@ -436,7 +467,7 @@ export default function ProductDetail() {
           let opts = {};
           try {
             opts = typeof m.optionsJson === 'string' ? JSON.parse(m.optionsJson) : (m.optionsJson || {});
-          } catch (e) {
+          } catch {
             opts = {};
           }
           return !opts[optName] || opts[optName] === valLabel;
@@ -454,7 +485,7 @@ export default function ProductDetail() {
       let combOpts = {};
       try {
         combOpts = typeof comb.optionsJson === 'string' ? JSON.parse(comb.optionsJson) : (comb.optionsJson || {});
-      } catch (e) {
+      } catch {
         combOpts = {};
       }
 
@@ -2141,32 +2172,27 @@ export default function ProductDetail() {
           <div id="cart-cta-section" className="hidden lg:grid lg:grid-cols-2 gap-3 pt-2">
             <Button
               color="light"
-              disabled={
-                !agreeTerms ||
-                pricing.isAvailable === false ||
-                priceStale ||
-                missingRequiredOptions.length > 0 ||
-                !compatibilityResult.isCompatible
-              }
+              disabled={isCtaDisabled}
               onClick={handleAddToCart}
               className="bg-white border-2 border-black hover:bg-gray-50 disabled:border-gray-300 disabled:text-gray-400 text-black font-extrabold py-1.5 rounded-xl text-sm"
             >
               Add To Cart
             </Button>
             <Button
-              disabled={
-                !agreeTerms ||
-                pricing.isAvailable === false ||
-                priceStale ||
-                missingRequiredOptions.length > 0 ||
-                !compatibilityResult.isCompatible
-              }
+              disabled={isCtaDisabled}
               onClick={handleBuyNow}
               className="bg-yellow-400 hover:bg-yellow-500 disabled:bg-gray-300 text-black font-black py-1.5 rounded-xl text-sm shadow-md"
             >
               Buy Now ➔
             </Button>
           </div>
+          {/* Inline reason instead of a silent disabled button — desktop counterpart to the
+              mobile sticky bar's blocking-reason strip below. */}
+          {isCtaDisabled && (
+            <p className="hidden lg:block text-xs font-bold text-amber-700 pt-1.5">
+              ⚠ {ctaBlockReason}
+            </p>
+          )}
 
           {/* Instant Delivery Code / Pincode Estimator */}
           <div className="mt-5">
@@ -2201,35 +2227,49 @@ export default function ProductDetail() {
         <Feedback />
       </div>
 
-      {/* Sticky Mobile Bottom Buy Bar (Positioned above MobileBottomNav) */}
+      {/* Sticky Mobile Bottom Buy Bar (Positioned above MobileBottomNav).
+          isCtaDisabled/ctaBlockReason are the exact same guard the desktop CTA row uses
+          (required options selected, options compatible, configuration available, server
+          price confirmed, terms accepted) — a mobile customer can no longer tap through to
+          an order the desktop flow would have blocked. */}
       <div
         id="mobile-cta-bar"
-        className="lg:hidden fixed bottom-13.5 sm:bottom-14 left-0 right-0 bg-white/98 backdrop-blur-md border-t border-gray-200 px-3 py-2 z-35 shadow-2xl flex items-center justify-between gap-3"
+        className="lg:hidden fixed bottom-13.5 sm:bottom-14 left-0 right-0 bg-white/98 backdrop-blur-md border-t border-gray-200 shadow-2xl z-35"
       >
-        <div className="flex-1 min-w-0">
-          <span className="text-[10px] text-gray-500 font-bold block truncate">
-            Total ({quantity} {product.quantityUnit || 'pcs'})
-          </span>
-          <span className="text-lg sm:text-xl font-black text-red-600">
-            ₹{pricing.subtotal?.toLocaleString('en-IN')}
-          </span>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button
-            size="xs"
-            color="light"
-            onClick={handleAddToCart}
-            className="bg-white border-2 border-black hover:bg-gray-50 text-black font-extrabold text-xs px-3 py-2 rounded-xl min-h-[44px]"
-          >
-            Add to Cart
-          </Button>
-          <Button
-            size="xs"
-            onClick={handleBuyNow}
-            className="bg-yellow-400 hover:bg-yellow-500 text-black font-black text-xs px-3.5 py-2 rounded-xl shadow-md min-h-[44px]"
-          >
-            Buy Now ➔
-          </Button>
+        {isCtaDisabled && (
+          <div className="px-3 pt-1.5 pb-1 bg-amber-50 border-b border-amber-200 flex items-center gap-1.5">
+            <span className="text-amber-600 text-xs">⚠</span>
+            <span className="text-[11px] font-bold text-amber-800 truncate">{ctaBlockReason}</span>
+          </div>
+        )}
+        <div className="px-3 py-2 flex items-center justify-between gap-3">
+          <div className="flex-1 min-w-0">
+            <span className="text-[10px] text-gray-500 font-bold block truncate">
+              Total ({quantity} {product.quantityUnit || 'pcs'})
+            </span>
+            <span className="text-lg sm:text-xl font-black text-red-600">
+              ₹{pricing.subtotal?.toLocaleString('en-IN')}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              size="xs"
+              color="light"
+              disabled={isCtaDisabled}
+              onClick={handleAddToCart}
+              className="bg-white border-2 border-black hover:bg-gray-50 disabled:border-gray-300 disabled:text-gray-400 text-black font-extrabold text-xs px-3 py-2 rounded-xl min-h-[44px]"
+            >
+              Add to Cart
+            </Button>
+            <Button
+              size="xs"
+              disabled={isCtaDisabled}
+              onClick={handleBuyNow}
+              className="bg-yellow-400 hover:bg-yellow-500 disabled:bg-gray-300 disabled:text-gray-500 text-black font-black text-xs px-3.5 py-2 rounded-xl shadow-md min-h-[44px]"
+            >
+              Buy Now ➔
+            </Button>
+          </div>
         </div>
       </div>
 
