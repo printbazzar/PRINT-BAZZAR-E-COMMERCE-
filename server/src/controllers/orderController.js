@@ -150,6 +150,18 @@ export const createOrder = async (req, res) => {
     const defaultShipping = settingsMap.has('DEFAULT_SHIPPING_CHARGE') ? JSON.parse(settingsMap.get('DEFAULT_SHIPPING_CHARGE')) : 80;
     const designJobPrefix = settingsMap.has('DESIGN_JOB_PREFIX') ? settingsMap.get('DESIGN_JOB_PREFIX').trim() : 'PB-DES';
 
+    // Task #29 IGST: the company's registered GST state is the existing canonical
+    // BUSINESS_INFORMATION_SETTINGS store (server/src/utils/businessInfoDefaults.js'
+    // DEFAULT_BUSINESS_INFO.tax.stateName, GSTIN state code "33" = Tamil Nadu) — not a
+    // value invented for this task. Falling back to "Tamil Nadu" when unset matches that
+    // same canonical default and the fallback already used elsewhere in this file for a
+    // missing shipping-address state.
+    const companyBusinessInfo = await getStoredBusinessInfo();
+    const companyHomeState = companyBusinessInfo?.tax?.stateName || companyBusinessInfo?.address?.state || 'Tamil Nadu';
+    const customerShippingState =
+      (typeof shippingAddress === 'object' && shippingAddress?.state) ? shippingAddress.state : companyHomeState;
+    const isInterState = String(customerShippingState).trim().toLowerCase() !== String(companyHomeState).trim().toLowerCase();
+
     // 2. Batch fetch all unique products in a single database roundtrip
     const productIds = Array.from(new Set(items.map((i) => i.productId)));
     const productsList = await prisma.product.findMany({
@@ -250,9 +262,21 @@ export const createOrder = async (req, res) => {
 
     // 3. Compute tax and grand totals
     const shippingCharge = isStorePickup ? 0 : (calculatedSubtotal >= shippingThreshold ? 0 : defaultShipping);
-    const totalTax = Math.round((calculatedSubtotal * gstRate) / 100);
-    const cgstAmount = Math.round(totalTax / 2);
-    const sgstAmount = totalTax - cgstAmount;
+    // Task #29 GST fix: calculatedSubtotal is GST-inclusive (grandTotal below adds only
+    // shipping, never tax, confirming this has always been the intended meaning) — the
+    // taxable value and the tax actually embedded in it are recovered by division, not
+    // `subtotal * rate/100` (that formula computed an ADDITIONAL rate% on top of the
+    // inclusive figure, overstating the stored tax breakdown — e.g. ~21 for a Rs.118-
+    // inclusive line at 18% instead of the correct Rs.18). This does not change
+    // grandTotal / what the customer is charged, only the stored tax breakdown.
+    const taxableAmount = Math.round(calculatedSubtotal / (1 + gstRate / 100));
+    const totalTax = calculatedSubtotal - taxableAmount;
+    // Task #29 IGST: intra-state (customer's shipping state matches the company's
+    // registered GST state, companyHomeState above) splits tax into CGST+SGST; inter-
+    // state charges IGST only. Previously igstAmount was hardcoded to 0 unconditionally.
+    const cgstAmount = isInterState ? 0 : Math.round(totalTax / 2);
+    const sgstAmount = isInterState ? 0 : totalTax - cgstAmount;
+    const igstAmount = isInterState ? totalTax : 0;
     const grandTotal = calculatedSubtotal + shippingCharge;
 
     // 4. Generate unique collision-proof human-readable Order, Invoice & Shipment Numbers (0ms, no table lock)
@@ -435,7 +459,7 @@ export const createOrder = async (req, res) => {
           shippingCharge,
           cgstAmount,
           sgstAmount,
-          igstAmount: 0,
+          igstAmount,
           totalTax,
           grandTotal,
           paymentStatus: 'PENDING',
@@ -520,10 +544,10 @@ export const createOrder = async (req, res) => {
             }))
           ),
           subtotal: calculatedSubtotal,
-          taxableAmount: calculatedSubtotal,
+          taxableAmount,
           cgst: cgstAmount,
           sgst: sgstAmount,
-          igst: 0,
+          igst: igstAmount,
           totalTax,
           shippingCharge,
           grandTotal,

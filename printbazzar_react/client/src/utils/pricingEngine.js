@@ -9,6 +9,76 @@
  * 6. GST Taxes & Delivery Logistics
  */
 
+// Shared with the server (server/src/utils/pricingEngine.js) — kept as a duplicated but
+// IDENTICAL predicate rather than a shared import, since client and server are separate
+// build targets. Any option name that can flip a slab from singleSidePrice to
+// doubleSidePrice is recognized as a "side" option (Task #11 fix, mirrored here in Task #15
+// to close the parity gap this client copy still had — see Method C below).
+export function isSideOptionKey(key) {
+  const keyLower = String(key ?? '').toLowerCase();
+  return (
+    keyLower.includes('side') ||
+    keyLower.includes('print') ||
+    keyLower.includes('location') ||
+    keyLower.includes('page')
+  );
+}
+
+// Canonical quantity model (Task #15) — identical rule to the server's resolveQuantityModel().
+// Never inferred from maxQty/slab-count/category/name; only the stored field is read.
+export function resolveQuantityModel(product) {
+  return product?.quantityType === 'OPEN_QUANTITY' ? 'OPEN_QUANTITY' : 'FIXED_SLAB';
+}
+
+// Identical rule to the server's isDoubleSideAvailable() — Double Side is only ever a real,
+// selectable option when its configured price is genuinely higher than Single Side, never a
+// generic surcharge guess.
+export function isDoubleSideAvailable(slab) {
+  if (!slab) return false;
+  const single = Number(slab.singleSidePrice) || 0;
+  const double = Number(slab.doubleSidePrice) || 0;
+  return double > 0 && double > single;
+}
+
+// Task #23/#24: identical range-matching + tie-break rule as the server's
+// matchFixedSlabForQuantity() (server/src/utils/pricingEngine.js) — kept as a
+// duplicated but IDENTICAL function for the same reason as isSideOptionKey()
+// above. See the server copy for the full rationale: Menu Card / SDC1
+// open-ended-ladder real data resolves via "highest minQty wins" (does not
+// reintroduce Task #12's bug); two explicitly-finite, genuinely overlapping
+// ranges (Task #24 Example D) always fail safely instead, since both bounds
+// were deliberately set and contradict each other; a true minQty tie among
+// the remaining candidates is the final safety net.
+export function matchFixedSlabForQuantity(priceSlabs, qty) {
+  const candidates = (priceSlabs || []).filter(
+    (s) => qty >= s.minQty && (s.maxQty === null || s.maxQty === undefined || qty <= s.maxQty)
+  );
+  if (candidates.length === 0) {
+    return { matchedSlab: null, isConfigError: false };
+  }
+  if (candidates.length === 1) {
+    return { matchedSlab: candidates[0], isConfigError: false };
+  }
+  const finiteCandidates = candidates.filter((s) => s.maxQty !== null && s.maxQty !== undefined);
+  if (finiteCandidates.length >= 2) {
+    return { matchedSlab: null, isConfigError: true };
+  }
+  const maxMinQty = Math.max(...candidates.map((s) => s.minQty));
+  const tightest = candidates.filter((s) => s.minQty === maxMinQty);
+  if (tightest.length > 1) {
+    return { matchedSlab: null, isConfigError: true };
+  }
+  return { matchedSlab: tightest[0], isConfigError: false };
+}
+
+// Identical to the server's describeConfiguredRanges().
+export function describeConfiguredRanges(priceSlabs) {
+  return [...(priceSlabs || [])]
+    .sort((a, b) => a.minQty - b.minQty)
+    .map((s) => (s.maxQty !== null && s.maxQty !== undefined ? `${s.minQty}-${s.maxQty}` : `${s.minQty}+`))
+    .join(', ');
+}
+
 export function checkIsDoubleSide(selectedOptions = {}) {
   if (!selectedOptions || typeof selectedOptions !== 'object') return false;
   const doubleSidePatterns = [
@@ -23,14 +93,8 @@ export function checkIsDoubleSide(selectedOptions = {}) {
     'front + back',
   ];
   return Object.entries(selectedOptions).some(([key, val]) => {
-    const keyLower = String(key).toLowerCase();
     const valLower = String(val).toLowerCase();
-    const isSideKey =
-      keyLower.includes('side') ||
-      keyLower.includes('print') ||
-      keyLower.includes('location') ||
-      keyLower.includes('page');
-    if (isSideKey) {
+    if (isSideOptionKey(key)) {
       return doubleSidePatterns.some((pattern) => valLower.includes(pattern));
     }
   });
@@ -278,83 +342,63 @@ export function calculatePricing({
   // Used if no combination matrix was matched or defined
   // =========================================================================
   let matchedSlab = null;
-  // Fixed (Phase 8C-3): fall back to slab pricing whenever the product is still available and no
-  // basePrice was set, matching the server engine's guard exactly. The previous condition blocked
-  // this fallback for any product with a pricing matrix (matrices.length > 0) whenever an exact
-  // matrix match wasn't found, even though the product was never marked unavailable — causing the
-  // client to display Rs.0 for valid non-matrix quantities (e.g. Textured Card / Economical Card
-  // at qty 99, 175, 1500) while the server correctly fell back to ProductPriceSlab.
+  // Task #15: this preview engine now mirrors the server's canonical, deterministic rules
+  // exactly (server/src/utils/pricingEngine.js) instead of maintaining its own independent
+  // interpolation/extrapolation/logarithmic-discount formulas. Those formulas are removed —
+  // this is a preview of what the server WILL charge, not a second, competing pricing engine.
   if (!basePrice && isAvailable) {
     const hasSlabs = product.priceSlabs && product.priceSlabs.length > 0;
 
     if (hasSlabs) {
       pricingMethod = 'SLABS';
-      const sortedSlabs = [...product.priceSlabs].sort((a, b) => a.minQty - b.minQty);
-      matchedSlab = sortedSlabs.find(
-        (s) => qty >= s.minQty && (s.maxQty === null || qty <= s.maxQty)
-      );
+      const quantityModel = resolveQuantityModel(product);
 
-      // If exact slab matched
-      if (matchedSlab && matchedSlab.minQty === qty) {
-        if (isDoubleSide && matchedSlab.doubleSidePrice > 0) {
-          basePrice = matchedSlab.doubleSidePrice;
-        } else if (matchedSlab.singleSidePrice > 0) {
-          basePrice = matchedSlab.singleSidePrice;
+      if (quantityModel === 'OPEN_QUANTITY') {
+        const rateSlab = [...product.priceSlabs].sort((a, b) => a.minQty - b.minQty)[0];
+        if (!Number.isInteger(qty) || qty < 1) {
+          isAvailable = false;
+          unavailableReason = 'Please enter a valid quantity (a whole number of 1 or more).';
+        } else if (isDoubleSide && !isDoubleSideAvailable(rateSlab)) {
+          isAvailable = false;
+          unavailableReason = 'Double Side printing is not available for this product.';
         } else {
-          basePrice = matchedSlab.unitPrice * qty;
+          const unitRate = isDoubleSide ? rateSlab.doubleSidePrice : rateSlab.singleSidePrice;
+          if (!unitRate || unitRate <= 0) {
+            isAvailable = false;
+            unavailableReason = 'This product has no configured price yet.';
+          } else {
+            basePrice = Math.round(unitRate * qty);
+          }
         }
       } else {
-        // Custom Quantity or In-Between Slabs
-        if (product.customUnitPrice && product.customUnitPrice > 0) {
-          pricingMethod = 'CUSTOM_UNIT';
-          // Progressive discount curve on custom unit rate for higher volumes
-          const volMultiplier = qty >= 5000 ? 0.65 : qty >= 2500 ? 0.75 : qty >= 1000 ? 0.85 : 1.0;
-          basePrice = Math.round(product.customUnitPrice * volMultiplier * qty * (isDoubleSide ? 1.35 : 1.0));
-        } else {
-          // Smooth progressive interpolation across volume slabs
-          let lowerSlab = null;
-          let upperSlab = null;
-          for (let i = 0; i < sortedSlabs.length; i++) {
-            if (sortedSlabs[i].minQty <= qty) {
-              lowerSlab = sortedSlabs[i];
-              upperSlab = sortedSlabs[i + 1] || null;
-            }
-          }
-
-          if (!lowerSlab) {
-            // qty is less than first slab: unit rate based on first slab + small volume premium
-            const firstSlab = sortedSlabs[0];
-            const firstBase = isDoubleSide && firstSlab.doubleSidePrice > 0
-              ? firstSlab.doubleSidePrice
-              : (firstSlab.singleSidePrice || (firstSlab.unitPrice * firstSlab.minQty));
-            const unitRate = (firstBase / firstSlab.minQty) * 1.15;
-            basePrice = Math.round(unitRate * qty);
-          } else if (upperSlab) {
-            // qty is between lowerSlab and upperSlab: smooth interpolation ensures unit price drops as qty rises
-            const lowerBase = isDoubleSide && lowerSlab.doubleSidePrice > 0
-              ? lowerSlab.doubleSidePrice
-              : (lowerSlab.singleSidePrice || (lowerSlab.unitPrice * lowerSlab.minQty));
-            const upperBase = isDoubleSide && upperSlab.doubleSidePrice > 0
-              ? upperSlab.doubleSidePrice
-              : (upperSlab.singleSidePrice || (upperSlab.unitPrice * upperSlab.minQty));
-
-            const lowerUnit = lowerBase / lowerSlab.minQty;
-            const upperUnit = upperBase / upperSlab.minQty;
-
-            const t = (qty - lowerSlab.minQty) / (upperSlab.minQty - lowerSlab.minQty);
-            const interpolatedUnit = lowerUnit - t * (lowerUnit - upperUnit);
-            basePrice = Math.round(interpolatedUnit * qty);
+        // FIXED_SLAB (Task #23): range match + tie-break, mirroring the server exactly
+        // — see matchFixedSlabForQuantity() above. No interpolation, no extrapolation.
+        const { matchedSlab: rangeMatchedSlab, isConfigError } = matchFixedSlabForQuantity(
+          product.priceSlabs,
+          qty
+        );
+        matchedSlab = rangeMatchedSlab;
+        if (isConfigError) {
+          isAvailable = false;
+          unavailableReason = `Quantity ${qty} is not available for this product right now due to a pricing configuration issue (overlapping quantity ranges). Please contact us so we can fix it.`;
+        } else if (!matchedSlab) {
+          isAvailable = false;
+          const configuredRanges = describeConfiguredRanges(product.priceSlabs);
+          unavailableReason = `Quantity ${qty} is not available for this product. Available quantities: ${configuredRanges}.`;
+        } else if (isDoubleSide) {
+          if (!isDoubleSideAvailable(matchedSlab)) {
+            isAvailable = false;
+            unavailableReason = 'Double Side printing is not available for this product at this quantity.';
           } else {
-            // qty is beyond the highest slab: award additional bulk volume efficiency
-            const highestSlab = lowerSlab;
-            const highestBase = isDoubleSide && highestSlab.doubleSidePrice > 0
-              ? highestSlab.doubleSidePrice
-              : (highestSlab.singleSidePrice || (highestSlab.unitPrice * highestSlab.minQty));
-            const highestUnit = highestBase / highestSlab.minQty;
-            const volumeEfficiency = Math.max(0.72, 1 - Math.log10(Math.max(1, qty / highestSlab.minQty)) * 0.18);
-            const unitRate = highestUnit * volumeEfficiency;
-            basePrice = Math.round(unitRate * qty);
+            basePrice = matchedSlab.doubleSidePrice;
           }
+        } else if (matchedSlab.singleSidePrice > 0) {
+          basePrice = matchedSlab.singleSidePrice;
+        } else if (matchedSlab.unitPrice > 0) {
+          basePrice = matchedSlab.unitPrice * qty;
+        } else {
+          isAvailable = false;
+          unavailableReason = 'This product has no configured price for this quantity.';
         }
       }
     } else if (product.customUnitPrice && product.customUnitPrice > 0) {
@@ -404,9 +448,13 @@ export function calculatePricing({
           (vm) => vm.customLabel === selectedVal || vm.masterValue?.label === selectedVal || vm.masterValue?.code === selectedVal
         );
         if (matchedVal && matchedVal.priceModifierValue > 0) {
-          // If option is a core printing side handled by slabs, skip duplicate surcharge
+          // If option is a core printing side handled by slabs, skip duplicate surcharge.
+          // Uses the shared isSideOptionKey() predicate (Task #15 — this client copy still had
+          // the old hardcoded three-string list that Task #11 already fixed server-side, which
+          // meant the preview and the real server charge could disagree for "Print Side"-style
+          // option names; now identical to the server).
           if (
-            (optName === 'Printing Location' || optName === 'Sides' || optName === 'Printing') &&
+            isSideOptionKey(optName) &&
             product.priceSlabs?.length > 0 &&
             pricingMethod === 'SLABS'
           ) {
@@ -453,8 +501,10 @@ export function calculatePricing({
       if (selectedVal && opt.values) {
         const matchedVal = opt.values.find((v) => v.valueLabel === selectedVal);
         if (matchedVal && matchedVal.priceModifierValue > 0) {
+          // Same shared predicate as the optionMappings branch above (Task #11 fix) — keeps
+          // the legacy ProductOption path consistent with the new-architecture path.
           if (
-            (opt.optionName === 'Printing Location' || opt.optionName === 'Sides' || opt.optionName === 'Printing') &&
+            isSideOptionKey(opt.optionName) &&
             product.priceSlabs?.length > 0 &&
             pricingMethod === 'SLABS'
           ) {
@@ -541,11 +591,18 @@ export function calculatePricing({
   // Shipping Calculation
   const shipping = isAvailable && (subtotal >= shippingThreshold || subtotal === 0) ? 0 : defaultShipping;
 
-  // Tax Calculation (GST)
+  // Tax Calculation (GST) — Task #29 GST fix, mirrors server/src/utils/pricingEngine.js exactly.
+  // `subtotal` is GST-inclusive; the taxable value and embedded tax are recovered by division,
+  // not `subtotal * rate/100` (which computed an additional rate% on top of the inclusive
+  // figure instead of extracting what's actually embedded in it).
   const taxRate = parseFloat(gstRate) || 18;
-  const totalTax = isAvailable ? Math.round((subtotal * taxRate) / 100) : 0;
+  const taxableAmount = isAvailable ? Math.round(subtotal / (1 + taxRate / 100)) : 0;
+  const totalTax = isAvailable ? subtotal - taxableAmount : 0;
   const cgst = Math.round(totalTax / 2);
   const sgst = totalTax - cgst;
+  // IGST vs CGST+SGST needs the customer's shipping state, which this preview function does
+  // not receive — the authoritative intra-/inter-state split happens server-side at order
+  // creation (orderController.js/posController.js). Left at 0 here by design.
   const igst = 0;
 
   const grandTotal = isAvailable ? subtotal + shipping : 0;
@@ -573,6 +630,7 @@ export function calculatePricing({
     subtotal,
     shipping,
     taxRate,
+    taxableAmount,
     totalTax,
     cgst,
     sgst,
@@ -605,25 +663,24 @@ export function getQuantityTierPricing({
 }) {
   if (!product) return [];
 
-  // Determine tiers to display
+  // Determine tiers to display. Task #15: quantity chips must only ever be REAL, configured
+  // ProductPriceSlab quantities — never a fabricated "standard industry tiers" ladder invented
+  // from product.minQuantity, since that list could (and for single-slab products, always did)
+  // include quantities the product was never actually configured to sell. FIXED_SLAB products
+  // show every configured tier, however many there are (including exactly one, which previously
+  // fell through to the fabricated ladder below). OPEN_QUANTITY products show no tier chips at
+  // all — the caller (DynamicQuantityTierPricing) renders a plain quantity stepper for those
+  // instead, per Task #15 Section 8.
   let tierQuantities = [];
   if (customTiers && Array.isArray(customTiers) && customTiers.length > 0) {
     tierQuantities = customTiers;
-  } else if (product.priceSlabs && product.priceSlabs.length > 1) {
+  } else if (resolveQuantityModel(product) === 'OPEN_QUANTITY') {
+    tierQuantities = [];
+  } else if (product.priceSlabs && product.priceSlabs.length > 0) {
     tierQuantities = [...product.priceSlabs].map((s) => s.minQty).sort((a, b) => a - b);
-  } else {
-    // Standard industry printing tiers based on product minQuantity
-    const minQ = product.minQuantity || 100;
-    if (minQ >= 500) {
-      tierQuantities = [500, 1000, 2000, 3000, 5000];
-    } else if (minQ >= 100) {
-      tierQuantities = [100, 250, 500, 1000, 2500, 5000];
-    } else if (minQ >= 25) {
-      tierQuantities = [25, 50, 100, 250, 500, 1000];
-    } else {
-      tierQuantities = [1, 5, 10, 25, 50, 100];
-    }
   }
+
+  if (tierQuantities.length === 0) return [];
 
   // Calculate base tier unit price for savings comparison
   const baseQty = tierQuantities[0] || 100;
@@ -652,8 +709,22 @@ export function getQuantityTierPricing({
         ? Math.round(((baseUnitPrice - thisUnitPrice) / baseUnitPrice) * 100)
         : 0;
 
+    // Task #23: chips must represent the product's real configured RANGE, not just its
+    // starting quantity, now that FIXED_SLAB matching is range-based. rangeLabel is purely
+    // additive/display — it does not change which quantity a click sets (still the tier's
+    // minQty, per Task #23 Requirement D: FIXED_SLAB storefront selection stays chip-only,
+    // no free-text/arbitrary-stepper entry — but the label must stop implying that ONLY the
+    // exact minQty is valid when a real maxQty range is configured).
+    const ownSlab = (product.priceSlabs || []).find((s) => s.minQty === tQty);
+    const rangeLabel =
+      ownSlab && ownSlab.maxQty !== null && ownSlab.maxQty !== undefined
+        ? `${tQty}-${ownSlab.maxQty}`
+        : `${tQty}+`;
+
     return {
       quantity: tQty,
+      maxQty: ownSlab && ownSlab.maxQty !== null && ownSlab.maxQty !== undefined ? ownSlab.maxQty : null,
+      rangeLabel,
       totalPrice: res.subtotal,
       unitPrice: res.unitPrice,
       savingsPct,

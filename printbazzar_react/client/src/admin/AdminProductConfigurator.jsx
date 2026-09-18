@@ -121,7 +121,13 @@ export default function AdminProductConfigurator() {
         setAvailableTemplates(res.data.availableTemplates || []);
 
         setPricingType(p.pricingType || 'TIERED');
-        setQuantityType(p.quantityType || 'FIXED');
+        // Task #15: normalize any stored quantityType to the canonical two-value model on
+        // load. Only the literal string 'OPEN_QUANTITY' is ever treated as OPEN_QUANTITY;
+        // everything else — including pre-Task-#15 legacy values (FIXED/CUSTOM/BOTH) — is
+        // normalized to 'FIXED_SLAB', matching resolveQuantityModel() in pricingEngine.js
+        // exactly, so the admin UI never shows/edits a value the pricing engine wouldn't
+        // itself recognize.
+        setQuantityType(p.quantityType === 'OPEN_QUANTITY' ? 'OPEN_QUANTITY' : 'FIXED_SLAB');
         setStartingPrice(p.startingPrice || 0);
         setCustomUnitPrice(p.customUnitPrice || '');
         setOptionMappings(p.optionMappings || []);

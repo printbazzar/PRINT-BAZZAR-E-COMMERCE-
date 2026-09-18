@@ -98,7 +98,15 @@ model Product {
   minQuantity      Int                    @default(1)
   maxQuantity      Int?
   quantityUnit     String                 @default("Pieces") // Cards, Pieces, Sheets, Pairs, Sq.ft, Boxes, Sets
-  quantityType     String                 @default("FIXED") // FIXED, CUSTOM, BOTH
+  quantityType     String                 @default("FIXED") // Canonical quantity model (Task #15): "OPEN_QUANTITY" | "FIXED_SLAB".
+                                                              // Read ONLY by calculatePricing()'s resolveQuantityModel() (server and
+                                                              // client pricingEngine.js) — never inferred from maxQty/slab-count/
+                                                              // category/name. Any value other than the literal string "OPEN_QUANTITY"
+                                                              // (including the pre-Task-#15 legacy values FIXED/CUSTOM/BOTH still held
+                                                              // by existing rows) is treated as FIXED_SLAB. The default here stays
+                                                              // "FIXED" only for historical continuity with existing rows; it has no
+                                                              // special canonical meaning of its own — no migration accompanies this
+                                                              // comment, and no column/type/default change is made by Task #29.
   customQtyMin     Int                    @default(100)
   customQtyMax     Int?
   customQtyStep    Int                    @default(50)
@@ -220,8 +228,17 @@ model ProductPriceSlab {
   id                     String  @id @default(uuid())
   productId              String
   product                Product @relation(fields: [productId], references: [id], onDelete: Cascade)
-  minQty                 Int
-  maxQty                 Int?
+  minQty                 Int     // FIXED_SLAB range-matching (Task #23/#24): a slab is a candidate
+                                  // for quantity `qty` when `qty >= minQty AND (maxQty is null OR
+                                  // qty <= maxQty)` — see matchFixedSlabForQuantity() in
+                                  // server/src/utils/pricingEngine.js for the full matching + safe-
+                                  // rejection rule (gaps and genuine finite-finite overlaps reject;
+                                  // open-ended ladders resolve to the highest matching minQty).
+  maxQty                 Int?    // Null/undefined means this tier is open-ended (no upper bound of
+                                  // its own — real production examples: Menu Card, SDC1). A real,
+                                  // finite value is a deliberate upper bound; two or more finite,
+                                  // genuinely overlapping ranges on the same product are a config
+                                  // error the pricing engine rejects rather than silently resolving.
   unitPrice              Float   @default(0)
   singleSidePrice        Float   @default(0)
   doubleSidePrice        Float   @default(0)

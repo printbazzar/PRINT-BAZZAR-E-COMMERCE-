@@ -416,6 +416,16 @@ export const createWalkInOrder = async (req, res) => {
     const designJobPrefix = settingsMap.has('DESIGN_JOB_PREFIX') ? settingsMap.get('DESIGN_JOB_PREFIX').trim() : 'PB-DES';
     const maxStaffDiscountPct = settingsMap.has('POS_MAX_STAFF_DISCOUNT_PCT') ? JSON.parse(settingsMap.get('POS_MAX_STAFF_DISCOUNT_PCT')) : 5.0;
 
+    // Task #29 IGST: same canonical company-state source as orderController.js — the
+    // existing BUSINESS_INFORMATION_SETTINGS store (businessInfoDefaults.js'
+    // DEFAULT_BUSINESS_INFO.tax.stateName, GSTIN state code "33" = Tamil Nadu), not a
+    // value invented for this task.
+    const companyBusinessInfo = await getStoredBusinessInfo();
+    const companyHomeState = companyBusinessInfo?.tax?.stateName || companyBusinessInfo?.address?.state || 'Tamil Nadu';
+    const customerShippingState =
+      (typeof shippingAddress === 'object' && shippingAddress?.state) ? shippingAddress.state : companyHomeState;
+    const isInterState = String(customerShippingState).trim().toLowerCase() !== String(companyHomeState).trim().toLowerCase();
+
     // 3. Authoritative Pricing Calculation via Central Pricing Engine
     const productIds = Array.from(new Set(items.map((i) => i.productId)));
     const productsList = await prisma.product.findMany({
@@ -530,10 +540,21 @@ export const createWalkInOrder = async (req, res) => {
     const isStorePickup = deliveryMethod === 'STORE_PICKUP' || deliveryType === 'PICKUP';
     const effectiveDeliveryMethod = isStorePickup ? 'STORE_PICKUP' : 'COURIER';
     const shippingCharge = isStorePickup ? 0 : (calculatedSubtotal >= shippingThreshold ? 0 : defaultShipping);
-    const totalTax = Math.round((Math.max(0, calculatedSubtotal - numericDiscount) * gstRate) / 100);
-    const cgstAmount = Math.round(totalTax / 2);
-    const sgstAmount = totalTax - cgstAmount;
-    const grandTotal = Math.max(0, calculatedSubtotal - numericDiscount) + shippingCharge;
+    // Discount is applied before GST (this was already correct — kept unchanged).
+    const discountedSubtotal = Math.max(0, calculatedSubtotal - numericDiscount);
+    // Task #29 GST fix: discountedSubtotal is GST-inclusive — the taxable value and the tax
+    // actually embedded in it are recovered by division, not `amount * rate/100` (same fix
+    // as orderController.js; see that file's comment for the full rationale). This does not
+    // change grandTotal / what the customer is charged, only the stored tax breakdown.
+    const taxableAmount = Math.round(discountedSubtotal / (1 + gstRate / 100));
+    const totalTax = discountedSubtotal - taxableAmount;
+    // Task #29 IGST: intra-state (customer's shipping state matches companyHomeState above)
+    // splits tax into CGST+SGST; inter-state charges IGST only. Previously igstAmount was
+    // hardcoded to 0 unconditionally.
+    const cgstAmount = isInterState ? 0 : Math.round(totalTax / 2);
+    const sgstAmount = isInterState ? 0 : totalTax - cgstAmount;
+    const igstAmount = isInterState ? totalTax : 0;
+    const grandTotal = discountedSubtotal + shippingCharge;
 
     // 6. Workflow Initial Status & Department (Rule #6)
     const hasDesignRequest = validatedItems.some((i) => i.designRequired);
@@ -622,7 +643,7 @@ export const createWalkInOrder = async (req, res) => {
           shippingCharge,
           cgstAmount,
           sgstAmount,
-          igstAmount: 0,
+          igstAmount,
           totalTax,
           grandTotal,
           paymentStatus,
@@ -705,10 +726,10 @@ export const createWalkInOrder = async (req, res) => {
             }))
           ),
           subtotal: calculatedSubtotal,
-          taxableAmount: Math.max(0, calculatedSubtotal - numericDiscount),
+          taxableAmount,
           cgst: cgstAmount,
           sgst: sgstAmount,
-          igst: 0,
+          igst: igstAmount,
           totalTax,
           shippingCharge,
           grandTotal,
