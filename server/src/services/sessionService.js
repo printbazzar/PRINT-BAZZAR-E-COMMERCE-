@@ -1,12 +1,14 @@
 import crypto from 'crypto';
-import { PrismaClient } from '@prisma/client';
+import prisma from '../lib/prisma.js';
 import {
   signAccessToken,
   signRefreshToken,
   verifyRefreshToken,
+  REFRESH_GRACE_WINDOW_MS,
+  REFRESH_TOKEN_ROTATION_GRACE_SECONDS,
 } from '../config/jwt.js';
 
-const prisma = new PrismaClient();
+export { REFRESH_GRACE_WINDOW_MS, REFRESH_TOKEN_ROTATION_GRACE_SECONDS };
 
 /**
  * Compute SHA-256 hash of a raw token for secure database indexing
@@ -77,7 +79,7 @@ export const createSession = async ({
 };
 
 /**
- * Rotate Refresh Token (Single-Use with Reuse Detection)
+ * Rotate Refresh Token (Single-Use with Reuse Detection & Grace Window)
  */
 export const rotateRefreshSession = async ({
   rawRefreshToken,
@@ -97,12 +99,82 @@ export const rotateRefreshSession = async ({
 
   const currentTokenHash = hashToken(rawRefreshToken);
 
-  // Find the session matching this token hash
-  const session = await prisma.authSession.findUnique({
+  // 1. Primary lookup: Find session matching active token hash
+  let session = await prisma.authSession.findUnique({
     where: { tokenHash: currentTokenHash },
   });
 
-  // Reuse Detection: If token hash not found or already revoked
+  // 2. Concurrency Check: If token hash not active, check if it was recently rotated within the grace window
+  if (!session) {
+    const recentSession = await prisma.authSession.findFirst({
+      where: { lastTokenHash: currentTokenHash },
+    });
+
+    if (recentSession) {
+      const isWithinGrace = recentSession.rotatedAt && (Date.now() - new Date(recentSession.rotatedAt).getTime() < REFRESH_GRACE_WINDOW_MS);
+      if (isWithinGrace && !recentSession.revoked) {
+        // Idempotent recovery for concurrent request within grace window!
+        let tokenPayload = {};
+        let freshUser = null;
+        let freshCustomer = null;
+
+        if (recentSession.userType === 'STAFF' && recentSession.userId) {
+          freshUser = await prisma.user.findUnique({
+            where: { id: recentSession.userId },
+            include: {
+              role: {
+                include: {
+                  permissions: {
+                    include: { permission: true },
+                  },
+                },
+              },
+            },
+          });
+          if (freshUser && freshUser.isActive) {
+            tokenPayload = {
+              userId: freshUser.id,
+              email: freshUser.email,
+              role: freshUser.role.name,
+              department: freshUser.department || 'ALL',
+              permissions: freshUser.role.permissions.map((rp) => rp.permission.code),
+            };
+          }
+        } else if (recentSession.userType === 'CUSTOMER' && recentSession.customerId) {
+          freshCustomer = await prisma.customer.findUnique({
+            where: { id: recentSession.customerId },
+          });
+          if (freshCustomer) {
+            tokenPayload = {
+              id: freshCustomer.id,
+              email: freshCustomer.email,
+              name: freshCustomer.name,
+              accountType: freshCustomer.accountType,
+              isCustomer: true,
+            };
+          }
+        }
+
+        const accessToken = signAccessToken({
+          ...tokenPayload,
+          sessionId: recentSession.id,
+          familyId: recentSession.familyId,
+          userType: recentSession.userType,
+        });
+
+        return {
+          accessToken,
+          refreshToken: null,
+          user: freshUser,
+          customer: freshCustomer,
+          userType: recentSession.userType,
+          isIdempotentRecovery: true,
+        };
+      }
+    }
+  }
+
+  // 3. Reuse Detection: If token hash not found or already revoked
   if (!session || session.revoked) {
     if (decoded && decoded.familyId) {
       // Invalidate the entire session family to neutralize attacker
@@ -118,7 +190,7 @@ export const rotateRefreshSession = async ({
     throw new Error('Refresh token revoked or reused. Please log in again.');
   }
 
-  // Expiry check
+  // 4. Expiry check
   if (new Date() > new Date(session.expiresAt)) {
     await prisma.authSession.update({
       where: { id: session.id },
@@ -131,7 +203,7 @@ export const rotateRefreshSession = async ({
     throw new Error('Session has expired. Please log in again.');
   }
 
-  // Fetch current user or customer data for the fresh access token
+  // 5. Fetch current user or customer data for the fresh access token
   let tokenPayload = {};
   let freshUser = null;
   let freshCustomer = null;
@@ -184,7 +256,7 @@ export const rotateRefreshSession = async ({
     throw new Error('Unknown session user type');
   }
 
-  // Generate NEW rotated refresh token
+  // 6. Generate NEW rotated refresh token
   const newRefreshToken = signRefreshToken({
     sessionId: session.id,
     familyId: session.familyId,
@@ -195,19 +267,69 @@ export const rotateRefreshSession = async ({
   });
 
   const newTokenHash = hashToken(newRefreshToken);
+  const now = new Date();
 
-  // Update session record with the new token hash
-  await prisma.authSession.update({
-    where: { id: session.id },
+  // 7. Atomic Conditional Update: Only update if tokenHash is still currentTokenHash and unrevoked
+  const updateResult = await prisma.authSession.updateMany({
+    where: {
+      id: session.id,
+      tokenHash: currentTokenHash,
+      revoked: false,
+    },
     data: {
       tokenHash: newTokenHash,
-      lastUsedAt: new Date(),
+      lastTokenHash: currentTokenHash,
+      rotatedAt: now,
+      lastUsedAt: now,
       ipAddress: ipAddress || session.ipAddress,
       userAgent: userAgent || session.userAgent,
     },
   });
 
-  // Generate NEW short-lived access token
+  // If atomic update matched 0 rows, another concurrent request completed rotation first!
+  if (updateResult.count === 0) {
+    const recheckedSession = await prisma.authSession.findUnique({
+      where: { id: session.id },
+    });
+
+    if (
+      recheckedSession &&
+      recheckedSession.lastTokenHash === currentTokenHash &&
+      recheckedSession.rotatedAt &&
+      Date.now() - new Date(recheckedSession.rotatedAt).getTime() < REFRESH_GRACE_WINDOW_MS &&
+      !recheckedSession.revoked
+    ) {
+      const accessToken = signAccessToken({
+        ...tokenPayload,
+        sessionId: recheckedSession.id,
+        familyId: recheckedSession.familyId,
+        userType: recheckedSession.userType,
+      });
+
+      return {
+        accessToken,
+        refreshToken: null,
+        user: freshUser,
+        customer: freshCustomer,
+        userType: recheckedSession.userType,
+        isIdempotentRecovery: true,
+      };
+    }
+
+    if (decoded && decoded.familyId) {
+      await prisma.authSession.updateMany({
+        where: { familyId: decoded.familyId },
+        data: {
+          revoked: true,
+          revokedAt: new Date(),
+          revokedReason: 'SUSPECTED_TOKEN_REUSE_ATTACK',
+        },
+      });
+    }
+    throw new Error('Refresh token revoked or reused. Please log in again.');
+  }
+
+  // 8. Generate NEW short-lived access token
   const newAccessToken = signAccessToken({
     ...tokenPayload,
     sessionId: session.id,

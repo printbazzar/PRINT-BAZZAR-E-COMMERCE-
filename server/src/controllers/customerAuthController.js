@@ -1,5 +1,5 @@
 import bcrypt from 'bcryptjs';
-import { PrismaClient } from '@prisma/client';
+import prisma from '../lib/prisma.js';
 import { OAuth2Client } from 'google-auth-library';
 import { signToken, verifyToken } from '../config/jwt.js';
 import {
@@ -13,10 +13,14 @@ import {
   COOKIE_NAMES,
 } from '../config/cookies.js';
 import { toCustomerSafeOrder } from '../utils/projections.js';
-import { getOtpConfig } from '../config/otpConfig.js';
+import crypto from 'crypto';
+import { getOtpConfig, computeOtpHmac, computeIpHash } from '../config/otpConfig.js';
+import { isCustomerOrderOwner } from '../middleware/auth.js';
+import { PASSWORD_LOGIN_MAX_ATTEMPTS, PASSWORD_LOGIN_LOCKOUT_SECONDS } from '../config/envValidator.js';
 export { authenticateCustomer } from '../middleware/auth.js';
 
-const prisma = new PrismaClient();
+const DUMMY_HASH = '$2a$10$wE8Z9R11WvA3k5K/H9zXk.2L1M4k4S4S4S4S4S4S4S4S4S4S4S4S';
+
 
 // Google ID-token verifier. GOOGLE_CLIENT_ID is loaded by the time this module
 // evaluates because customerAuthController.js imports config/jwt.js above,
@@ -36,6 +40,7 @@ const generateCustomerToken = (customer) => {
       name: customer.name,
       accountType: customer.accountType,
       isCustomer: true,
+      userType: 'CUSTOMER',
     },
     { expiresIn: '30d' }
   );
@@ -211,15 +216,91 @@ export const customerLogin = async (req, res) => {
     });
 
     if (!customer || !customer.passwordHash) {
+      // Timing attack protection against non-existent email/mobile enumeration
+      await bcrypt.compare(password, DUMMY_HASH);
       return res.status(401).json({
         success: false,
-        message: 'Invalid credentials. If you placed guest orders before, please click "Sign Up" to activate your password.',
+        message: 'Invalid credentials.',
       });
+    }
+
+    // 1. Account Lockout Check (Pre-bcrypt CPU protection - advisory)
+    const now = new Date();
+    if (customer.loginBlockedUntil && now < new Date(customer.loginBlockedUntil)) {
+      return res.status(401).json({ success: false, message: 'Invalid credentials.' });
     }
 
     const isMatch = await bcrypt.compare(password, customer.passwordHash);
     if (!isMatch) {
-      return res.status(401).json({ success: false, message: 'Invalid password. Please retry.' });
+      await prisma.$transaction(async (tx) => {
+        const rows = await tx.$queryRaw`
+          SELECT "id", "failedLoginAttempts", "loginBlockedUntil"
+          FROM "Customer"
+          WHERE "id" = ${customer.id}
+          FOR UPDATE
+        `;
+        const dbCust = (rows && rows[0]) || customer;
+        const txNow = new Date();
+
+        // Re-check lockout state
+        if (dbCust.loginBlockedUntil && txNow < new Date(dbCust.loginBlockedUntil)) {
+          return;
+        }
+
+        // Handle expired lockout
+        let currentAttempts = dbCust.failedLoginAttempts || 0;
+        if (dbCust.loginBlockedUntil && txNow >= new Date(dbCust.loginBlockedUntil)) {
+          currentAttempts = 0;
+        }
+
+        let newAttempts = currentAttempts + 1;
+        let newBlockedUntil = null;
+
+        if (newAttempts >= PASSWORD_LOGIN_MAX_ATTEMPTS) {
+          newAttempts = PASSWORD_LOGIN_MAX_ATTEMPTS;
+          newBlockedUntil = new Date(txNow.getTime() + PASSWORD_LOGIN_LOCKOUT_SECONDS * 1000);
+        }
+
+        await tx.customer.update({
+          where: { id: customer.id },
+          data: {
+            failedLoginAttempts: newAttempts,
+            loginBlockedUntil: newBlockedUntil,
+          },
+        });
+      }, { maxWait: 15000, timeout: 30000 });
+
+      return res.status(401).json({ success: false, message: 'Invalid credentials.' });
+    }
+
+    // Successful match path - execute transactional row lock re-check and reset
+    const successResult = await prisma.$transaction(async (tx) => {
+      const rows = await tx.$queryRaw`
+        SELECT "id", "failedLoginAttempts", "loginBlockedUntil"
+        FROM "Customer"
+        WHERE "id" = ${customer.id}
+        FOR UPDATE
+      `;
+      const dbCust = (rows && rows[0]) || customer;
+      const txNow = new Date();
+
+      if (dbCust.loginBlockedUntil && txNow < new Date(dbCust.loginBlockedUntil)) {
+        return { success: false };
+      }
+
+      await tx.customer.update({
+        where: { id: customer.id },
+        data: {
+          failedLoginAttempts: 0,
+          loginBlockedUntil: null,
+        },
+      });
+
+      return { success: true };
+    }, { maxWait: 15000, timeout: 30000 });
+
+    if (!successResult.success) {
+      return res.status(401).json({ success: false, message: 'Invalid credentials.' });
     }
 
     // Create server-tracked AuthSession (15m Access Token + 7d Refresh Token)
@@ -502,13 +583,18 @@ export const getCustomerProfile = async (req, res) => {
   try {
     const customer = req.customer;
 
-    // Fetch customer's orders
+    // Fetch customer's orders: registered orders MUST match customerId; guest orders (customerId == null) fallback to mobile/email
     const orders = await prisma.order.findMany({
       where: {
         OR: [
           { customerId: customer.id },
-          ...(customer.email ? [{ customerEmail: customer.email }] : []),
-          { customerMobile: customer.mobile },
+          {
+            customerId: null,
+            OR: [
+              ...(customer.mobile ? [{ customerMobile: customer.mobile }] : []),
+              ...(customer.email ? [{ customerEmail: customer.email }] : []),
+            ],
+          },
         ],
       },
       include: {
@@ -569,8 +655,13 @@ export const getCustomerOrders = async (req, res) => {
       where: {
         OR: [
           { customerId: customer.id },
-          ...(customer.email ? [{ customerEmail: customer.email }] : []),
-          { customerMobile: customer.mobile },
+          {
+            customerId: null,
+            OR: [
+              ...(customer.mobile ? [{ customerMobile: customer.mobile }] : []),
+              ...(customer.email ? [{ customerEmail: customer.email }] : []),
+            ],
+          },
         ],
       },
       include: {
@@ -653,6 +744,11 @@ export const reorderPreviousOrder = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Previous order not found.' });
     }
 
+    // Ownership Guard: Authenticated customer MUST own the target order
+    if (!req.customer || !isCustomerOrderOwner(previousOrder, req.customer)) {
+      return res.status(403).json({ success: false, message: 'Forbidden: You do not have permission to reorder this order.' });
+    }
+
     // Return cart items payload ready for checkout
     const reorderItems = previousOrder.items.map((item) => ({
       productId: item.productId,
@@ -693,7 +789,6 @@ export const sendCustomerOtp = async (req, res) => {
     // Resilient Strategy: If OTP provider is disabled or unavailable
     if (!otpConfig.enabled || !otpConfig.isAvailable) {
       if (otpConfig.required) {
-        // Enforce OTP only if explicitly configured as mandatory via MOBILE_OTP_REQUIRED=true
         return res.status(503).json({
           success: false,
           code: 'OTP_SERVICE_UNAVAILABLE',
@@ -704,9 +799,6 @@ export const sendCustomerOtp = async (req, res) => {
         });
       }
 
-      // Safe temporary strategy (MOBILE_OTP_REQUIRED=false):
-      // Do NOT permanently block checkout when provider is unconfigured.
-      // Explain that mobile OTP is optional and allow customer to continue with details or Google/Email.
       return res.json({
         success: false,
         code: 'OTP_OPTIONAL',
@@ -718,40 +810,200 @@ export const sendCustomerOtp = async (req, res) => {
     }
 
     const cleanMobile = String(mobile).trim().replace(/[^0-9]/g, '').slice(-10);
-    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-    const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+    const rawIp = req.ip || req.connection?.remoteAddress || req.headers?.['x-forwarded-for'] || '127.0.0.1';
+    const ipHash = computeIpHash(rawIp);
 
-    let customer = await prisma.customer.findFirst({
-      where: { mobile: cleanMobile },
-    });
+    const now = new Date();
+    const sixtySecsAgo = new Date(now.getTime() - 60 * 1000);
+    const fifteenMinsAgo = new Date(now.getTime() - 15 * 60 * 1000);
+    const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
+    const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 
-    if (!customer) {
-      customer = await prisma.customer.create({
+    const rawNum = crypto.randomInt(100000, 1000000);
+    const otpCode = String(rawNum);
+    const otpHash = computeOtpHmac(cleanMobile, otpCode);
+    const otpExpiresAt = new Date(now.getTime() + 10 * 60 * 1000); // 10 minutes
+
+    // Database-Authoritative Transaction for Concurrency-Safe Rate Limiting & OTP Dispatch
+    const result = await prisma.$transaction(async (tx) => {
+      let customer = await tx.customer.findFirst({
+        where: { mobile: cleanMobile },
+      });
+
+      // 1. Account Lockout Check
+      if (customer && customer.otpBlockedUntil && now < new Date(customer.otpBlockedUntil)) {
+        const remainingMinutes = Math.ceil((new Date(customer.otpBlockedUntil).getTime() - now.getTime()) / 60000);
+        await tx.otpRequestLog.create({
+          data: { mobile: cleanMobile, ipHash, provider: otpConfig.provider, status: 'BLOCKED' },
+        });
+        return {
+          status: 429,
+          body: {
+            success: false,
+            code: 'TOO_MANY_FAILED_ATTEMPTS',
+            message: `Account temporarily locked due to excessive failed verification attempts. Please try again in ${remainingMinutes} minute(s).`,
+          },
+        };
+      }
+
+      // 2. Mobile 60-Second Cooldown Check
+      if (customer && customer.otpLastSentAt) {
+        const elapsedMs = now.getTime() - new Date(customer.otpLastSentAt).getTime();
+        if (elapsedMs < 60000) {
+          const remainingSec = Math.ceil((60000 - elapsedMs) / 1000);
+          await tx.otpRequestLog.create({
+            data: { mobile: cleanMobile, ipHash, provider: otpConfig.provider, status: 'COOLDOWN_BLOCKED' },
+          });
+          return {
+            status: 429,
+            body: {
+              success: false,
+              code: 'RESEND_COOLDOWN',
+              message: `Please wait ${remainingSec} second(s) before requesting a new OTP.`,
+              retryAfterSeconds: remainingSec,
+            },
+          };
+        }
+      }
+
+      // 3. Rolling 1-Hour Limit Check (Max 3 / 60 minutes)
+      const hourlyCount = await tx.otpRequestLog.count({
+        where: { mobile: cleanMobile, status: 'SENT', createdAt: { gte: oneHourAgo } },
+      });
+      if (hourlyCount >= 3) {
+        await tx.otpRequestLog.create({
+          data: { mobile: cleanMobile, ipHash, provider: otpConfig.provider, status: 'HOURLY_BLOCKED' },
+        });
+        return {
+          status: 429,
+          body: {
+            success: false,
+            code: 'HOURLY_LIMIT_EXCEEDED',
+            message: 'Hourly OTP request limit reached for this mobile number. Maximum 3 requests allowed per hour. Please try again later.',
+            retryAfterSeconds: 3600,
+          },
+        };
+      }
+
+      // 4. Rolling 24-Hour Limit Check (Max 5 / 24 hours)
+      const dailyCount = await tx.otpRequestLog.count({
+        where: { mobile: cleanMobile, status: 'SENT', createdAt: { gte: twentyFourHoursAgo } },
+      });
+      if (dailyCount >= 5) {
+        await tx.otpRequestLog.create({
+          data: { mobile: cleanMobile, ipHash, provider: otpConfig.provider, status: 'DAILY_BLOCKED' },
+        });
+        return {
+          status: 429,
+          body: {
+            success: false,
+            code: 'DAILY_LIMIT_EXCEEDED',
+            message: 'Daily OTP request limit reached for this mobile number. Maximum 5 requests allowed per day. Please try again tomorrow.',
+            retryAfterSeconds: 86400,
+          },
+        };
+      }
+
+      // 5. IP Hash 15-Minute Limit Check (Max 10 / 15 minutes)
+      const ipCount = await tx.otpRequestLog.count({
+        where: { ipHash, status: 'SENT', createdAt: { gte: fifteenMinsAgo } },
+      });
+      if (ipCount >= 10) {
+        await tx.otpRequestLog.create({
+          data: { mobile: cleanMobile, ipHash, provider: otpConfig.provider, status: 'IP_BLOCKED' },
+        });
+        return {
+          status: 429,
+          body: {
+            success: false,
+            code: 'IP_LIMIT_EXCEEDED',
+            message: 'Too many verification requests from your IP connection. Please try again in 15 minutes.',
+            retryAfterSeconds: 900,
+          },
+        };
+      }
+
+      // Atomic Update/Creation of Customer record
+      if (!customer) {
+        customer = await tx.customer.create({
+          data: {
+            name: `Customer ${cleanMobile.slice(-4)}`,
+            mobile: cleanMobile,
+            otpHash,
+            otpExpiresAt,
+            otpLastSentAt: now,
+            otpAttempts: 0,
+            otpCode: null,
+          },
+        });
+      } else {
+        // Atomic conditional update to prevent concurrent race conditions
+        const updateRes = await tx.customer.updateMany({
+          where: {
+            id: customer.id,
+            OR: [
+              { otpLastSentAt: null },
+              { otpLastSentAt: { lte: sixtySecsAgo } },
+            ],
+          },
+          data: {
+            otpHash,
+            otpExpiresAt,
+            otpLastSentAt: now,
+            otpAttempts: 0,
+            otpCode: null,
+          },
+        });
+
+        if (updateRes.count === 0) {
+          // Concurrent transaction reserved cooldown ahead of us
+          await tx.otpRequestLog.create({
+            data: { mobile: cleanMobile, ipHash, provider: otpConfig.provider, status: 'COOLDOWN_BLOCKED' },
+          });
+          return {
+            status: 429,
+            body: {
+              success: false,
+              code: 'RESEND_COOLDOWN',
+              message: 'Please wait 60 second(s) before requesting a new OTP.',
+              retryAfterSeconds: 60,
+            },
+          };
+        }
+      }
+
+      // Record successful OTP dispatch event in OtpRequestLog
+      await tx.otpRequestLog.create({
         data: {
-          name: `Customer ${cleanMobile.slice(-4)}`,
           mobile: cleanMobile,
-          otpCode,
-          otpExpiresAt,
+          ipHash,
+          provider: otpConfig.provider,
+          status: 'SENT',
+          createdAt: now,
         },
       });
-    } else {
-      await prisma.customer.update({
-        where: { id: customer.id },
-        data: { otpCode, otpExpiresAt },
-      });
-    }
 
-    // In non-production or simulator mode, log test OTP for automated testing and dev verification
-    if (!isProduction || otpConfig.provider === 'SIMULATOR') {
-      console.log(`[AUTH OTP - TEST MODE] Generated OTP for mobile ${cleanMobile}: ${otpCode}`);
-    }
-
-    return res.json({
-      success: true,
-      message: `OTP sent successfully to +91 ${cleanMobile}`,
-      mobile: cleanMobile,
-      devOtp: !isProduction || otpConfig.provider === 'SIMULATOR' ? otpCode : undefined,
+      return {
+        status: 200,
+        body: {
+          success: true,
+          message: `OTP sent successfully to +91 ${cleanMobile}`,
+          mobile: cleanMobile,
+          devOtp: !isProduction || otpConfig.provider === 'SIMULATOR' ? otpCode : undefined,
+        },
+        otpCode,
+      };
     });
+
+    if (result.status !== 200) {
+      return res.status(result.status).json(result.body);
+    }
+
+    if (!isProduction || otpConfig.provider === 'SIMULATOR') {
+      console.log(`[AUTH OTP - TEST MODE] Generated OTP for mobile ${cleanMobile}: ${result.otpCode}`);
+    }
+
+    return res.status(200).json(result.body);
   } catch (error) {
     console.error('Send OTP error:', error);
     return res.status(500).json({ success: false, message: 'Failed to generate verification OTP.' });
@@ -775,42 +1027,112 @@ export const verifyCustomerOtp = async (req, res) => {
       include: { savedAddresses: true },
     });
 
-    if (!customer || !customer.otpCode) {
+    if (!customer || (!customer.otpHash && !customer.otpCode)) {
       return res.status(400).json({ success: false, message: 'No OTP requested for this mobile number.' });
     }
 
+    // 1. Account Lockout Check
+    if (customer.otpBlockedUntil && new Date() < new Date(customer.otpBlockedUntil)) {
+      const remainingMinutes = Math.ceil((new Date(customer.otpBlockedUntil).getTime() - Date.now()) / 60000);
+      return res.status(429).json({
+        success: false,
+        code: 'ACCOUNT_LOCKED',
+        message: `Account is temporarily locked due to excessive failed verification attempts. Please try again in ${remainingMinutes} minute(s).`,
+      });
+    }
+
+    // 2. Expiry Check
     if (new Date() > new Date(customer.otpExpiresAt)) {
       return res.status(400).json({ success: false, message: 'OTP has expired. Please request a new code.' });
     }
 
     const isProduction = process.env.NODE_ENV === 'production';
     const inputOtp = String(otp).trim();
+    const computedInputHmac = computeOtpHmac(cleanMobile, inputOtp);
 
-    // Strict OTP validation:
-    // In production, MUST match customer.otpCode strictly.
-    // In non-production, allow matching customer.otpCode OR '123456' for development & automated testing.
-    const isRealOtpMatch = Boolean(customer.otpCode && customer.otpCode === inputOtp);
-    const isDevTestBypass = !isProduction && inputOtp === '123456';
-
-    if (!isRealOtpMatch && !isDevTestBypass) {
-      return res.status(400).json({ success: false, message: 'Invalid verification OTP code.' });
+    // 3. Timing-Safe & HMAC-bound Comparison
+    let isRealOtpMatch = false;
+    if (customer.otpHash && computedInputHmac) {
+      const inputBuffer = Buffer.from(computedInputHmac, 'utf8');
+      const storedBuffer = Buffer.from(customer.otpHash, 'utf8');
+      if (inputBuffer.length === storedBuffer.length) {
+        isRealOtpMatch = crypto.timingSafeEqual(inputBuffer, storedBuffer);
+      }
+    } else if (customer.otpCode) {
+      // Legacy fallback if otpCode was previously stored in DB
+      isRealOtpMatch = customer.otpCode === inputOtp;
     }
 
-    const updatedCustomer = await prisma.customer.update({
-      where: { id: customer.id },
+    const isDevTestBypass = !isProduction && inputOtp === '123456';
+    const isValidOtp = isRealOtpMatch || isDevTestBypass;
+
+    // 4. Handle Incorrect OTP (Atomic Increment & Lockout at 5 Attempts)
+    if (!isValidOtp) {
+      const updatedCust = await prisma.customer.update({
+        where: { id: customer.id },
+        data: { otpAttempts: { increment: 1 } },
+      });
+
+      const newAttempts = updatedCust.otpAttempts;
+
+      if (newAttempts >= 5) {
+        const blockedUntil = new Date(Date.now() + 15 * 60 * 1000); // 15-minute lockout
+        await prisma.customer.update({
+          where: { id: customer.id },
+          data: {
+            otpHash: null,
+            otpCode: null,
+            otpBlockedUntil: blockedUntil,
+          },
+        });
+        return res.status(429).json({
+          success: false,
+          code: 'TOO_MANY_FAILED_ATTEMPTS',
+          message: 'Too many incorrect verification attempts. Account locked for 15 minutes.',
+        });
+      }
+
+      const remainingAttempts = Math.max(0, 5 - newAttempts);
+      return res.status(400).json({
+        success: false,
+        message: `Invalid verification OTP code. ${remainingAttempts} attempt(s) remaining.`,
+      });
+    }
+
+    // 5. Atomic Conditional Consumption (One-Time Use Enforcement)
+    const consumeResult = await prisma.customer.updateMany({
+      where: {
+        id: customer.id,
+        OR: [
+          { otpHash: customer.otpHash },
+          { otpCode: customer.otpCode },
+        ],
+      },
       data: {
+        otpHash: null,
         otpCode: null,
         otpExpiresAt: null,
+        otpAttempts: 0,
+        otpBlockedUntil: null,
         name: name && name.trim() ? name.trim() : customer.name,
       },
+    });
+
+    if (consumeResult.count === 0 && !isDevTestBypass) {
+      return res.status(400).json({ success: false, message: 'OTP already verified or consumed. Please request a new code.' });
+    }
+
+    const updatedCustomer = await prisma.customer.findUnique({
+      where: { id: customer.id },
       include: { savedAddresses: true },
     });
 
+    // 6. Issue Session & Auth Cookies
     const { accessToken, refreshToken, session } = await createSession({
       userType: 'CUSTOMER',
       customerId: updatedCustomer.id,
-      ipAddress: req.ip || req.connection.remoteAddress,
-      userAgent: req.headers['user-agent'],
+      ipAddress: req.ip || req.connection?.remoteAddress || '127.0.0.1',
+      userAgent: req.headers?.['user-agent'] || 'test',
       payload: {
         id: updatedCustomer.id,
         email: updatedCustomer.email,
@@ -844,7 +1166,7 @@ export const verifyCustomerOtp = async (req, res) => {
         city: updatedCustomer.city,
         state: updatedCustomer.state,
         pincode: updatedCustomer.pincode,
-        savedAddresses: updatedCustomer.savedAddresses,
+        savedAddresses: updatedCustomer.savedAddresses || [],
       },
       sessionId: session.id,
     });

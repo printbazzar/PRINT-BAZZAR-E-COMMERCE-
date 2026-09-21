@@ -1,9 +1,7 @@
-import { PrismaClient } from '@prisma/client';
+import prisma from '../lib/prisma.js';
 import { verifyToken } from '../config/jwt.js';
 import { isSessionActive } from '../services/sessionService.js';
 import { COOKIE_NAMES } from '../config/cookies.js';
-
-const prisma = new PrismaClient();
 
 /**
  * Extract token from either Authorization header or cookies
@@ -31,6 +29,19 @@ export const authenticateAdmin = async (req, res, next) => {
     }
 
     const decoded = verifyToken(token);
+
+    // 1. Enforce Token Type: Must be ACCESS token
+    if (decoded.tokenType && decoded.tokenType !== 'ACCESS') {
+      return res.status(401).json({ success: false, message: 'Invalid token type for access.' });
+    }
+
+    // 2. Enforce Domain Boundary: Must be STAFF userType
+    if (decoded.userType && decoded.userType !== 'STAFF') {
+      return res.status(401).json({ success: false, message: 'Invalid token domain for staff authentication.' });
+    }
+    if (decoded.isCustomer || (decoded.customerId && !decoded.userId)) {
+      return res.status(401).json({ success: false, message: 'Invalid token domain for staff authentication.' });
+    }
 
     // Validate active session in database if token has a sessionId
     if (decoded.sessionId) {
@@ -90,6 +101,19 @@ export const authenticateCustomer = async (req, res, next) => {
     }
 
     const decoded = verifyToken(token);
+
+    // 1. Enforce Token Type: Must be ACCESS token
+    if (decoded.tokenType && decoded.tokenType !== 'ACCESS') {
+      return res.status(401).json({ success: false, message: 'Invalid token type for access.' });
+    }
+
+    // 2. Enforce Domain Boundary: Must be CUSTOMER userType
+    if (decoded.userType && decoded.userType !== 'CUSTOMER') {
+      return res.status(401).json({ success: false, message: 'Invalid token domain for customer authentication.' });
+    }
+    if (decoded.userId && !decoded.customerId && !decoded.isCustomer && decoded.userType !== 'CUSTOMER') {
+      return res.status(401).json({ success: false, message: 'Invalid token domain for customer authentication.' });
+    }
 
     // Validate active session in database if token has a sessionId
     if (decoded.sessionId) {
@@ -171,6 +195,11 @@ export const authenticateCustomerOrAdmin = async (req, res, next) => {
 
     const decoded = verifyToken(token);
 
+    // 1. Enforce Token Type: Must be ACCESS token
+    if (decoded.tokenType && decoded.tokenType !== 'ACCESS') {
+      return res.status(401).json({ success: false, message: 'Invalid token type for access.' });
+    }
+
     // Validate active session in database if token has a sessionId
     if (decoded.sessionId) {
       const active = await isSessionActive(decoded.sessionId);
@@ -183,7 +212,10 @@ export const authenticateCustomerOrAdmin = async (req, res, next) => {
       }
     }
 
-    if (decoded.userId || (decoded.userType === 'STAFF' && decoded.id)) {
+    const isStaffToken = decoded.userType === 'STAFF' || (decoded.userId && !decoded.isCustomer && decoded.userType !== 'CUSTOMER');
+    const isCustomerToken = decoded.userType === 'CUSTOMER' || decoded.isCustomer || (decoded.customerId && decoded.userType !== 'STAFF');
+
+    if (isStaffToken && decoded.userType !== 'CUSTOMER') {
       // Admin/Staff Session
       const userId = decoded.userId || decoded.id;
       const user = await prisma.user.findUnique({
@@ -211,7 +243,7 @@ export const authenticateCustomerOrAdmin = async (req, res, next) => {
         req.sessionId = decoded.sessionId || null;
         return next();
       }
-    } else if (decoded.id || decoded.customerId || decoded.userType === 'CUSTOMER') {
+    } else if (isCustomerToken && decoded.userType !== 'STAFF') {
       // Customer Session
       const customerId = decoded.id || decoded.customerId;
       const customer = await prisma.customer.findUnique({
@@ -249,7 +281,16 @@ export const optionalCustomerOrAdmin = async (req, res, next) => {
     if (!token) return next();
 
     const decoded = verifyToken(token);
-    if (decoded.userId || (decoded.userType === 'STAFF' && decoded.id)) {
+
+    // Enforce Token Type: Must be ACCESS token
+    if (decoded.tokenType && decoded.tokenType !== 'ACCESS') {
+      return next();
+    }
+
+    const isStaffToken = decoded.userType === 'STAFF' || (decoded.userId && !decoded.isCustomer && decoded.userType !== 'CUSTOMER');
+    const isCustomerToken = decoded.userType === 'CUSTOMER' || decoded.isCustomer || (decoded.customerId && decoded.userType !== 'STAFF');
+
+    if (isStaffToken && decoded.userType !== 'CUSTOMER') {
       const userId = decoded.userId || decoded.id;
       const user = await prisma.user.findUnique({
         where: { id: userId },
@@ -273,7 +314,7 @@ export const optionalCustomerOrAdmin = async (req, res, next) => {
           permissions: user.role.permissions.map((rp) => rp.permission.code),
         };
       }
-    } else if (decoded.id || decoded.customerId || decoded.userType === 'CUSTOMER') {
+    } else if (isCustomerToken && decoded.userType !== 'STAFF') {
       const customerId = decoded.id || decoded.customerId;
       const customer = await prisma.customer.findUnique({
         where: { id: customerId },
@@ -288,10 +329,30 @@ export const optionalCustomerOrAdmin = async (req, res, next) => {
   return next();
 };
 
+/**
+ * Helper to verify whether an order belongs to a customer.
+ * Security Invariant: If order.customerId is present, ownership is strictly order.customerId === customer.id.
+ * Mobile/email fallback is ONLY evaluated for guest orders (order.customerId == null).
+ */
+export const isCustomerOrderOwner = (order, customer) => {
+  if (!order || !customer) return false;
+
+  // Authoritative ownership rule: If order has an assigned customerId, it MUST match customer.id.
+  if (order.customerId) {
+    return order.customerId === customer.id;
+  }
+
+  // Guest order fallback (order.customerId is null/undefined): Match mobile or email
+  const isPhoneMatch = Boolean(order.customerMobile && customer.mobile && order.customerMobile.trim() === customer.mobile.trim());
+  const isEmailMatch = Boolean(order.customerEmail && customer.email && order.customerEmail.trim().toLowerCase() === customer.email.trim().toLowerCase());
+  return isPhoneMatch || isEmailMatch;
+};
+
 export default {
   authenticateAdmin,
   authenticateCustomer,
   authenticateCustomerOrAdmin,
   optionalCustomerOrAdmin,
   requirePermission,
+  isCustomerOrderOwner,
 };

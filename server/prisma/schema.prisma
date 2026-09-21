@@ -16,10 +16,13 @@ model User {
   department      String               @default("ALL") // DESIGN, PRODUCTION, FINISHING_QC, PACKING, DELIVERY, ALL
   roleId          String
   role            Role                 @relation(fields: [roleId], references: [id])
-  isActive        Boolean              @default(true)
-  lastLoginAt     DateTime?
-  createdAt       DateTime             @default(now())
-  updatedAt       DateTime             @updatedAt
+  isActive            Boolean              @default(true)
+  lastLoginAt         DateTime?
+  failedLoginAttempts Int                  @default(0)
+  loginBlockedUntil   DateTime?
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+
 
   orderNotes      OrderNote[]
   statusHistories OrderStatusHistory[]
@@ -459,14 +462,17 @@ model Customer {
   city                 String?
   state                String?
   pincode              String?
-  otpCode              String?
-  otpHash              String?
+  otpCode              String?           // Deprecated: Plaintext OTP (legacy field)
+  otpHash              String?           // HMAC-SHA256 hash of active 6-digit OTP
+  otpExpiresAt         DateTime?
   otpAttempts          Int               @default(0)
   otpLastSentAt        DateTime?
   otpBlockedUntil      DateTime?
-  otpExpiresAt         DateTime?
+  failedLoginAttempts  Int               @default(0)
+  loginBlockedUntil    DateTime?
   createdAt            DateTime          @default(now())
   updatedAt            DateTime          @updatedAt
+
 
   orders               Order[]
   carts                Cart[]
@@ -1056,6 +1062,8 @@ model AuthSession {
   userId        String?
   customerId    String?
   tokenHash     String    @unique // SHA-256 hash of active refresh token
+  lastTokenHash String?   // SHA-256 hash of immediately preceding rotated refresh token
+  rotatedAt     DateTime? // Timestamp when current token rotation occurred
   familyId      String    // Session family ID for reuse detection
   ipAddress     String?
   userAgent     String?
@@ -1190,4 +1198,21 @@ model QuoteRequest {
   @@index([productId])
   @@index([status])
   @@index([createdAt(sort: Desc)])
+}
+
+// ==========================================
+// PHASE 0C.3.5: OTP REQUEST LOG & DISTRIBUTED RATE LIMITING
+// ==========================================
+
+model OtpRequestLog {
+  id        String   @id @default(uuid())
+  mobile    String
+  ipHash    String?
+  provider  String?
+  status    String   // 'SENT', 'FAILED', 'BLOCKED', 'COOLDOWN_BLOCKED', 'HOURLY_BLOCKED', 'DAILY_BLOCKED', 'IP_BLOCKED'
+  createdAt DateTime @default(now())
+
+  @@index([mobile, createdAt])
+  @@index([ipHash, createdAt])
+  @@index([createdAt])
 }

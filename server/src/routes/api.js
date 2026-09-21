@@ -84,6 +84,7 @@ import {
   sendCustomerOtp,
   verifyCustomerOtp,
 } from '../controllers/customerAuthController.js';
+import { cleanOtpLogs } from '../controllers/cronController.js';
 import { getCsrfTokenEndpoint } from '../middleware/csrfProtection.js';
 import {
   getStaffList,
@@ -238,26 +239,26 @@ router.get('/reviews', getReviews);
 // Orders & Checkout (Customer Authenticated & Protected)
 router.post('/orders', orderCreationLimiter, optionalCustomerOrAdmin, validateOrderCreation, createOrder);
 router.get('/orders/track/:orderIdentifier', optionalCustomerOrAdmin, trackOrder);
-router.post('/orders/upload-artwork', upload.single('artwork'), uploadArtwork);
+router.post('/orders/upload-artwork', authenticateCustomerOrAdmin, upload.single('artwork'), uploadArtwork);
 router.post('/artwork/upload', upload.single('file'), uploadArtworkFile);
 router.post('/artwork/upload-file', upload.single('artwork'), uploadArtworkFile);
 router.delete('/artwork/:id', authenticateCustomerOrAdmin, deleteArtworkFile);
 router.get('/artwork/:id', authenticateCustomerOrAdmin, getArtworkUploadById);
-router.post('/orders/:orderNumber/approve-proof', approveCustomerProof);
-router.get('/orders/:orderId/invoice', optionalCustomerOrAdmin, getOrderInvoice);
+router.post('/orders/:orderNumber/approve-proof', authenticateCustomerOrAdmin, approveCustomerProof);
+router.get('/orders/:orderId/invoice', authenticateCustomerOrAdmin, getOrderInvoice);
 
 // Payment Gateway Verification & Webhook (Online Orders)
 router.post('/payments/create-order', createPaymentSession);
 router.post('/payments/verify', verifyPayment);
-router.post('/payments/convert-to-cod', convertToCod);
+router.post('/payments/convert-to-cod', authenticateCustomerOrAdmin, convertToCod);
 router.post('/payments/webhook', handlePaymentWebhook);
 
 // Public Design Services Routes
 router.get('/design-services/packages', getDesignPackages);
 router.get('/design-services/addons', getDesignAddons);
 router.get('/design-services/product/:productId', getProductDesignMapping);
-router.post('/design-orders/:id/feedback', submitRevisionFeedback);
-router.post('/design-orders/:id/approve', approveDesign);
+router.post('/design-orders/:id/feedback', authenticateCustomerOrAdmin, submitRevisionFeedback);
+router.post('/design-orders/:id/approve', authenticateCustomerOrAdmin, approveDesign);
 
 // Custom Quote Requests (Public — guest & authenticated customers)
 router.post('/shop/quote-request', createQuoteRequest);
@@ -503,5 +504,8 @@ router.get('/admin/staff', authenticateAdmin, requirePermission('USER_MANAGE'), 
 router.post('/admin/staff', authenticateAdmin, requirePermission('USER_MANAGE'), createStaff);
 router.put('/admin/staff/:id', authenticateAdmin, requirePermission('USER_MANAGE'), updateStaff);
 router.delete('/admin/staff/:id', authenticateAdmin, requirePermission('USER_MANAGE'), deleteStaff);
+
+// Internal Maintenance & Cron Endpoints
+router.post('/internal/cron/clean-otp-logs', cleanOtpLogs);
 
 export default router;

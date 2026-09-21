@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "AuthSession" ADD COLUMN IF NOT EXISTS "lastTokenHash" TEXT,
+ADD COLUMN IF NOT EXISTS "rotatedAt" TIMESTAMP(3);
