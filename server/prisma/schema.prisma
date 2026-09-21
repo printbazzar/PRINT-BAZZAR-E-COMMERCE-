@@ -460,6 +460,10 @@ model Customer {
   state                String?
   pincode              String?
   otpCode              String?
+  otpHash              String?
+  otpAttempts          Int               @default(0)
+  otpLastSentAt        DateTime?
+  otpBlockedUntil      DateTime?
   otpExpiresAt         DateTime?
   createdAt            DateTime          @default(now())
   updatedAt            DateTime          @updatedAt
