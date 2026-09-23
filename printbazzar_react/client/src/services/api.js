@@ -1,7 +1,29 @@
-// Prefer same-origin /api/v1 so Vercel rewrites proxy transparently to live Render backend with zero CORS/cookie issues
-const API_BASE_URL = typeof window !== 'undefined'
-  ? `${window.location.origin}/api/v1`
-  : (import.meta.env.VITE_API_URL || 'https://printbazzar-api.onrender.com/api/v1');
+// Clean environment & runtime API resolution:
+// - Uses VITE_API_URL if explicitly set at build time (e.g. Vercel Staging project env)
+// - Automatically routes to Staging API on staging/preview hosts or ?env=staging query parameter
+// - Defaults to same-origin /api/v1 (proxying via vercel.json to live Production API) on Production frontend
+const getApiBaseUrl = () => {
+  if (import.meta.env.VITE_API_URL) {
+    return import.meta.env.VITE_API_URL;
+  }
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname;
+    const search = window.location.search || '';
+    if (
+      host.includes('staging') ||
+      host.includes('preview') ||
+      host.includes('git-staging') ||
+      search.includes('env=staging')
+    ) {
+      return 'https://printbazzar-api-staging.onrender.com/api/v1';
+    }
+    return `${window.location.origin}/api/v1`;
+  }
+  return 'https://printbazzar-api.onrender.com/api/v1';
+};
+
+const API_BASE_URL = getApiBaseUrl();
+
 
 function getCsrfToken() {
   if (typeof document === 'undefined') return null;
