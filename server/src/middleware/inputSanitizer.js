@@ -94,7 +94,7 @@ export const validateOrderCreation = (req, res, next) => {
     });
   }
 
-  const cleanMobile = String(customerMobile || '').replace(/\D/g, '');
+  const cleanMobile = String(customerMobile || '').replace(/\D/g, '').slice(-10);
   if (cleanMobile.length !== 10) {
     return res.status(400).json({
       success: false,

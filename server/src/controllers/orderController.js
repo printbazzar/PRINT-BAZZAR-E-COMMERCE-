@@ -65,7 +65,7 @@ export const createOrder = async (req, res) => {
 
     // If not authenticated or customerId not found, find or create directly from checkout details
     if (!orderCustomer) {
-      const cleanMobile = customerMobile.trim();
+      const cleanMobile = String(customerMobile || '').replace(/\D/g, '').slice(-10);
       const cleanEmail = customerEmail ? customerEmail.trim().toLowerCase() : null;
 
       // Find by mobile or email
@@ -317,9 +317,10 @@ export const createOrder = async (req, res) => {
       customer = await prisma.customer.findUnique({ where: { id: customerId } });
     }
 
-    if (!customer && customerMobile) {
+    const cleanCustomerMobile = String(customerMobile || '').replace(/\D/g, '').slice(-10);
+    if (!customer && cleanCustomerMobile) {
       customer = await prisma.customer.findFirst({
-        where: { mobile: customerMobile.trim() },
+        where: { mobile: cleanCustomerMobile },
       });
     }
 

@@ -10,12 +10,17 @@ import PaymentGatewayModal from '../Components/PaymentGatewayModal';
 import LazyImage from '../Components/LazyImage';
 import GoogleAuthButton from '../Components/GoogleAuthButton';
 import { useBusinessInfo } from '../context/BusinessInfoContext';
+import { computeInclusiveGstBreakdown } from '../utils/gstDisplay';
 
 export default function Checkout() {
   const { businessInfo } = useBusinessInfo();
   const { cartItems, cartSubtotal, cartShipping, cartGrandTotal, clearCart } = useCart();
   const { customer, isCorporate, setCustomerSession } = useCustomerAuth();
   const navigate = useNavigate();
+  // Task #30: cartSubtotal is GST-inclusive; the breakdown below must divide, not
+  // multiply, to recover what's actually embedded in it (see gstDisplay.js — same
+  // fix as Task #29's server-side formula correction).
+  const gstBreakdown = computeInclusiveGstBreakdown(cartSubtotal, 18);
 
   const [storeSettings, setStoreSettings] = useState(null);
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
@@ -246,12 +251,15 @@ export default function Checkout() {
 
     try {
       const isPickup = formData.deliveryMethod === 'STORE_PICKUP';
+      const cleanMobile = formData.customerMobile ? formData.customerMobile.replace(/\D/g, '').slice(-10) : '';
+      const cleanWhatsapp = (formData.customerWhatsapp || formData.customerMobile || '').replace(/\D/g, '').slice(-10);
+
       const orderPayload = {
         customerId: customer?.id || null,
         customerName: formData.customerName,
         customerEmail: formData.customerEmail,
-        customerMobile: formData.customerMobile,
-        customerWhatsapp: formData.customerWhatsapp || formData.customerMobile,
+        customerMobile: cleanMobile,
+        customerWhatsapp: cleanWhatsapp,
         deliveryMethod: formData.deliveryMethod,
         shippingAddress: isPickup
           ? {
@@ -277,7 +285,7 @@ export default function Checkout() {
         deliveryType: isPickup ? 'PICKUP' : formData.deliveryType,
         paymentMethod: formData.paymentMethod,
         items: cartItems.map((item) => ({
-          productId: item.product.id,
+          productId: item.product?.id || item.productId || item.id,
           quantity: item.quantity,
           selectedOptions: item.selectedOptions,
           designRequired: item.designRequired || item.artworkOption === 'DESIGN_SUPPORT',
@@ -810,15 +818,15 @@ export default function Checkout() {
               <div className="space-y-1 bg-gray-50 p-3 rounded-xl border border-gray-200 text-xs">
                 <div className="flex justify-between text-gray-800 font-bold">
                   <span>Applicable GST (18% included):</span>
-                  <span className="text-gray-900">₹{Math.round((cartSubtotal * 18) / 100)}</span>
+                  <span className="text-gray-900">₹{gstBreakdown.totalTax}</span>
                 </div>
                 <div className="flex justify-between text-gray-500 pl-2">
                   <span>• Central GST (CGST 9%):</span>
-                  <span>₹{Math.round((cartSubtotal * 9) / 100)}</span>
+                  <span>₹{gstBreakdown.cgst}</span>
                 </div>
                 <div className="flex justify-between text-gray-500 pl-2">
                   <span>• State GST (SGST 9%):</span>
-                  <span>₹{Math.round((cartSubtotal * 9) / 100)}</span>
+                  <span>₹{gstBreakdown.sgst}</span>
                 </div>
               </div>
               <div className="flex justify-between text-lg font-bold text-gray-900 pt-3 border-t">
