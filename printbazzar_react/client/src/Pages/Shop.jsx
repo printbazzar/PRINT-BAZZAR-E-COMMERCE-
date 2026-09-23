@@ -129,12 +129,13 @@ export default function Shop() {
       });
     }
 
-    // Rating filter
+    // Rating filter — Task #30: only ever compare a product's own real rating.
+    // The previous `p.rating || 4.7` fallback silently credited every unrated
+    // product with an invented 4.7-star rating, so a "4★ & Above" filter could
+    // include products with no real rating data at all. A product with no rating
+    // now correctly falls out of any rating filter instead of being fabricated in.
     if (ratingFilter > 0) {
-      result = result.filter((p) => {
-        const r = p.rating || 4.7;
-        return r >= ratingFilter;
-      });
+      result = result.filter((p) => typeof p.rating === 'number' && p.rating >= ratingFilter);
     }
 
     // Badges filter

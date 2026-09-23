@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { computeInclusiveGstBreakdown } from '../utils/gstDisplay';
 
 const CartContext = createContext();
 
@@ -81,7 +82,11 @@ export const CartProvider = ({ children }) => {
   const cartCount = cartItems.reduce((sum, item) => sum + (item.quantity ? 1 : 0), 0);
   const cartSubtotal = cartItems.reduce((sum, item) => sum + (item.totalPrice || 0), 0);
   const cartShipping = cartSubtotal >= 1500 || cartSubtotal === 0 ? 0 : 80;
-  const cartTax = Math.round((cartSubtotal * 18) / 100);
+  // Task #30: cartSubtotal is GST-INCLUSIVE (it sums each item's already-inclusive
+  // totalPrice from the pricing engine). The tax actually embedded in it is
+  // recovered by division, not `subtotal * rate/100` — see gstDisplay.js for the
+  // full rationale (same fix as Task #29's server-side formula correction).
+  const cartTax = computeInclusiveGstBreakdown(cartSubtotal, 18).totalTax;
   const cartGrandTotal = cartSubtotal + cartShipping;
 
   return (

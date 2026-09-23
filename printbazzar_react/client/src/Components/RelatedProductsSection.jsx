@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { HiOutlineSparkles, HiOutlineArrowRight } from 'react-icons/hi';
+import { HiOutlineArrowRight } from 'react-icons/hi';
 import LazyImage from './LazyImage';
 import { api } from '../services/api';
 
@@ -31,16 +31,15 @@ export default function RelatedProductsSection({ currentProductId, categorySlug,
 
   return (
     <div className="mt-14 pt-8 border-t border-gray-200">
+      {/* Task #30: this section lists other products in the same category —
+          api.getProducts({ category: categorySlug }) — not a personalization or
+          "frequently bought together" algorithm. The heading says exactly that,
+          per the brief's explicit instruction not to claim AI/personalized
+          recommendations the underlying data doesn't back up. */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 mb-6">
         <div>
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] font-black uppercase tracking-wider text-yellow-800 bg-yellow-100 px-2.5 py-0.5 rounded-full">
-              RECOMMENDED COMBOS
-            </span>
-            <span className="text-xs text-gray-500 font-medium hidden sm:inline">• Frequently Ordered Together</span>
-          </div>
-          <h3 className="text-xl sm:text-2xl font-black text-gray-900 mt-1">
-            Complete Your Brand Stationery
+          <h3 className="text-xl sm:text-2xl font-black text-gray-900">
+            Related Products
           </h3>
         </div>
 

@@ -4,10 +4,14 @@ import { Button, Breadcrumb } from 'flowbite-react';
 import { HiHome, HiTrash, HiOutlineShoppingBag, HiArrowRight, HiOutlinePencil } from 'react-icons/hi';
 import { useCart } from '../context/CartContext';
 import Feedback from '../Components/Feedback';
+import { computeInclusiveGstBreakdown } from '../utils/gstDisplay';
 
 export default function Cart() {
   const { cartItems, removeFromCart, updateQuantity, cartSubtotal, cartShipping, cartGrandTotal, clearCart } = useCart();
   const navigate = useNavigate();
+  // Task #30: cartSubtotal is GST-inclusive; the breakdown below must divide, not
+  // multiply, to recover what's actually embedded in it (see gstDisplay.js).
+  const gstBreakdown = computeInclusiveGstBreakdown(cartSubtotal, 18);
 
   if (cartItems.length === 0) {
     return (
@@ -78,6 +82,7 @@ export default function Cart() {
                       onClick={() => removeFromCart(item.cartItemId)}
                       className="text-red-500 hover:text-red-700 p-1 rounded-lg hover:bg-red-50 transition"
                       title="Remove item"
+                      aria-label={`Remove ${item.product?.name || 'item'} from cart`}
                     >
                       <HiTrash className="w-5 h-5" />
                     </button>
@@ -233,15 +238,15 @@ export default function Cart() {
               <div className="space-y-1.5 bg-gray-50 p-3 rounded-xl border border-gray-200 text-xs">
                 <div className="flex justify-between text-gray-800 font-bold">
                   <span>Applicable GST (18% included):</span>
-                  <span className="text-gray-900">₹{Math.round((cartSubtotal * 18) / 100)}</span>
+                  <span className="text-gray-900">₹{gstBreakdown.totalTax}</span>
                 </div>
                 <div className="flex justify-between text-gray-500 pl-2">
                   <span>• Central GST (CGST 9%):</span>
-                  <span>₹{Math.round((cartSubtotal * 9) / 100)}</span>
+                  <span>₹{gstBreakdown.cgst}</span>
                 </div>
                 <div className="flex justify-between text-gray-500 pl-2">
                   <span>• State GST (SGST 9%):</span>
-                  <span>₹{Math.round((cartSubtotal * 9) / 100)}</span>
+                  <span>₹{gstBreakdown.sgst}</span>
                 </div>
               </div>
               <div className="flex justify-between text-lg font-bold text-gray-900 pt-3 border-t">
